@@ -1,0 +1,28 @@
+# Template GBDT cho bài tabular — tận dụng 2 GPU T4 bằng cách chạy song song các fold.
+#
+# mode: parallel → runner mở 2 "slot" (GPU 0 và GPU 1). 5 job fold được xếp hàng:
+#   GPU0: fold0 → fold2 → fold4      GPU1: fold1 → fold3
+# Cả 2 GPU bận suốt phiên → thời gian phiên (= quota) giảm gần một nửa so với chạy tuần tự.
+# Sau khi các fold xong, `post` gom OOF để tính CV tổng (chạy CPU).
+mode: parallel
+expect_gpus: 2
+metric_direction: maximize
+
+jobs:
+  - {name: fold0, script: train.py, args: "--fold 0", smoke_args: "--fold 0"}
+  - {name: fold1, script: train.py, args: "--fold 1"}
+  - {name: fold2, script: train.py, args: "--fold 2"}
+  - {name: fold3, script: train.py, args: "--fold 3"}
+  - {name: fold4, script: train.py, args: "--fold 4"}
+smoke_max_jobs: 1      # smoke test trên CPU chỉ chạy fold đầu với dữ liệu nhỏ
+
+post: {script: aggregate.py, args: ""}
+
+env: {}                # biến môi trường thêm cho mọi job
+pip: []                # gói cần cài thêm (cần enable_internet)
+dataset_sources: []    # dataset riêng cho thí nghiệm này, dạng "user/slug"
+
+# Biến thể khác cho 2 GPU:
+#   - seed averaging: 2 job cùng cấu hình khác --seed, mỗi job 1 GPU
+#   - so sánh A/B trong 1 phiên: job "a" và job "b" với tham số khác nhau;
+#     không có `post` thì runner chọn biến thể có CV tốt nhất làm điểm của thí nghiệm.

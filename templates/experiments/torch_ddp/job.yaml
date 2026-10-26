@@ -1,0 +1,27 @@
+# Template deep learning — 1 mô hình huấn luyện trên CẢ 2 GPU T4 bằng DDP.
+#
+# Runner chạy: torchrun --standalone --nproc_per_node=2 train.py <args>
+# (smoke test trên CPU: python train.py <smoke_args>, 1 tiến trình).
+#
+# Lưu ý phần cứng T4 (Turing, sm_75, 15GB mỗi GPU):
+#   - dùng AMP fp16 + GradScaler; T4 KHÔNG hỗ trợ bf16 hiệu quả
+#   - FlashAttention-2 không chạy trên T4 → dùng torch SDPA (mặc định của PyTorch)
+#   - CPU chỉ ~4 nhân cho cả 2 tiến trình → num_workers=2 mỗi tiến trình
+#   - 2 GPU nối qua PCIe; nếu NCCL treo, đặt env NCCL_P2P_DISABLE=1
+mode: ddp
+expect_gpus: 2
+metric_direction: maximize
+script: train.py
+args: "--epochs 10 --batch-size 64 --lr 3e-4"
+smoke_args: "--epochs 1 --batch-size 8 --max-steps 20"
+
+env: {}
+pip: []
+dataset_sources: []
+
+# Muốn chạy 2 biến thể độc lập (mỗi GPU một cấu hình) thay vì DDP, đổi thành:
+# mode: parallel
+# jobs:
+#   - {name: lr3e-4, script: train.py, args: "--lr 3e-4 --epochs 10"}
+#   - {name: lr1e-4, script: train.py, args: "--lr 1e-4 --epochs 10"}
+# (train.py tự nhận ra không có WORLD_SIZE và chạy 1 GPU; runner chọn biến thể có CV tốt nhất.)

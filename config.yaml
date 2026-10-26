@@ -1,0 +1,43 @@
+# Cấu hình chung cho Kaggle Research Agent (kra).
+# Mỗi cuộc thi có thêm competitions/<slug>/project.yaml để ghi đè các giá trị dưới đây.
+
+kaggle:
+  # Tài khoản Kaggle khai báo trong .env (KAGGLE_ACCOUNTS=...). Dòng dưới chỉ dùng khi chạy 1 tài khoản
+  # theo kiểu cũ (~/.kaggle/kaggle.json, không đặt KAGGLE_ACCOUNTS).
+  username: "your-kaggle-username"
+  # "NvidiaTeslaT4" = GPU T4 x2 trên Kaggle. Runner tự kiểm tra số GPU thực nhận
+  # và ghi vào metrics.json; nếu chỉ thấy 1 GPU, agent sẽ được cảnh báo.
+  accelerator: "NvidiaTeslaT4"
+  enable_internet: true          # không nộp bài nên bật để pip install / tải pretrained
+  max_runtime_hours: 9           # trần an toàn cho 1 phiên GPU (Kaggle: 9–12h tùy nguồn)
+  safety_margin_minutes: 20      # runner báo deadline sớm hơn để kịp lưu checkpoint
+  title_prefix: "kra"            # tiền tố tên kernel trên Kaggle
+
+budget:
+  weekly_gpu_hours: 30           # quota tuần MỖI tài khoản Kaggle (reset 00:00 UTC thứ Bảy)
+  project_gpu_hours: 20          # trần GPU cho MỘT dự án, cộng trên mọi tài khoản (ghi đè trong project.yaml)
+  reserve_hours: 1.0             # mỗi tài khoản luôn chừa lại, không bao giờ tiêu
+  startup_overhead_hours: 0.05   # cộng thêm mỗi lần chạy (khởi động container)
+  phases:                        # phân bổ ngân sách theo giai đoạn (tỉ lệ của project_gpu_hours)
+    explore: 0.2                 # baseline + thử nhanh nhiều hướng
+    exploit: 0.6                 # đào sâu các hướng tốt nhất
+    final: 0.2                   # ensemble, seed averaging, chạy dài
+
+stop:
+  patience: 4                    # số thí nghiệm GPU liên tiếp không cải thiện thì dừng
+  min_delta: 0.0005              # cải thiện nhỏ hơn mức này coi như không cải thiện
+  target_score: null             # đạt điểm CV này thì dừng (null = không đặt)
+
+poll_interval_minutes: 10
+
+downloads:                       # tải dữ liệu từ link gửi qua Telegram
+  max_gb: 50                     # giới hạn mỗi lần tải (còn kiểm tra dung lượng ổ trống)
+
+telegram:
+  enabled: true                  # token & chat id đặt trong .env
+
+paths:
+  competitions_dir: competitions
+  # Thư mục thả dữ liệu: mỗi thư mục con = một bộ dữ liệu/dự án (kèm task.md mô tả bài toán).
+  # Đường dẫn tương đối tính từ thư mục project; có thể đặt tuyệt đối, vd /home/kra/kra-dropbox
+  dropbox: dropbox
