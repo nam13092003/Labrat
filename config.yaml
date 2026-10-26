@@ -1,4 +1,4 @@
-# Cấu hình chung cho Kaggle Research Agent (kra).
+# Cấu hình chung cho Labrat.
 # Mỗi cuộc thi có thêm competitions/<slug>/project.yaml để ghi đè các giá trị dưới đây.
 
 kaggle:
@@ -11,7 +11,7 @@ kaggle:
   enable_internet: true          # không nộp bài nên bật để pip install / tải pretrained
   max_runtime_hours: 9           # trần an toàn cho 1 phiên GPU (Kaggle: 9–12h tùy nguồn)
   safety_margin_minutes: 20      # runner báo deadline sớm hơn để kịp lưu checkpoint
-  title_prefix: "kra"            # tiền tố tên kernel trên Kaggle
+  title_prefix: "labrat"            # tiền tố tên kernel trên Kaggle
 
 budget:
   weekly_gpu_hours: 30           # quota tuần MỖI tài khoản Kaggle (reset 00:00 UTC thứ Bảy)
@@ -39,5 +39,5 @@ telegram:
 paths:
   competitions_dir: competitions
   # Thư mục thả dữ liệu: mỗi thư mục con = một bộ dữ liệu/dự án (kèm task.md mô tả bài toán).
-  # Đường dẫn tương đối tính từ thư mục project; có thể đặt tuyệt đối, vd /home/kra/kra-dropbox
+  # Đường dẫn tương đối tính từ thư mục project; có thể đặt tuyệt đối, vd /home/labrat/labrat-dropbox
   dropbox: dropbox

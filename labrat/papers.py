@@ -1,13 +1,13 @@
 """Nghiên cứu sâu MỘT paper: tải về, trích văn bản, tạo khung phân tích, xuất thẻ HTML.
 
-  kra paper <slug> 2406.12345            (mã arXiv)
-  kra paper <slug> https://arxiv.org/abs/2406.12345
-  kra paper <slug> https://.../paper.pdf
-  kra paper <slug> /đường/dẫn/paper.pdf  (file người dùng gửi qua Telegram)
+  labrat paper <slug> 2406.12345            (mã arXiv)
+  labrat paper <slug> https://arxiv.org/abs/2406.12345
+  labrat paper <slug> https://.../paper.pdf
+  labrat paper <slug> /đường/dẫn/paper.pdf  (file người dùng gửi qua Telegram)
 
 Kết quả: competitions/<slug>/papers/<pid>/{paper.pdf, text.txt, meta.json, analysis.md}
 Agent đọc text.txt, điền analysis.md (gồm bảng đề xuất thực nghiệm), rồi
-`kra paper-report <slug> <pid> --send` để gửi thẻ HTML.
+`labrat paper-report <slug> <pid> --send` để gửi thẻ HTML.
 """
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ from .bundle import slugify
 from .config import comp_dir
 from .registry import now_iso
 
-UA = {"User-Agent": "kaggle-research-agent/0.2"}
+UA = {"User-Agent": "Labrat/0.2"}
 ARXIV_ID = re.compile(r"(?:arxiv\.org/(?:abs|pdf|html)/)?(\d{4}\.\d{4,5}|[a-z\-]+(?:\.[A-Z]{2})?/\d{7})(v\d+)?",
                       re.I)
 
@@ -191,7 +191,7 @@ border-left:3px solid var(--line);color:var(--muted)}.md code{background:var(--s
            f'<title>{_html.escape(meta.get("title", pid))[:80]}</title><style>{CSS}{extra}</style></head>'
            f'<body><div class="wrap"><div class="card"><span class="pill">Phân tích paper</span>'
            f'<div class="md" style="margin-top:12px">{body}</div></div>'
-           f'<footer>Kaggle Research Agent · {_html.escape(cfg["slug"])} · {_html.escape(pid)}</footer>'
+           f'<footer>Labrat · {_html.escape(cfg["slug"])} · {_html.escape(pid)}</footer>'
            f'</div></body></html>')
     out = pdir / "analysis.html"
     out.write_text(doc, encoding="utf-8")

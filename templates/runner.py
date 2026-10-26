@@ -1,6 +1,6 @@
 # ============================================================================
-# KRA RUNNER — chạy BÊN TRONG kernel Kaggle.
-# Được bundler ghép sau phần payload (KRA_FILES, KRA_SPEC). Chỉ dùng thư viện chuẩn.
+# LABRAT RUNNER — chạy BÊN TRONG kernel Kaggle.
+# Được bundler ghép sau phần payload (LABRAT_FILES, LABRAT_SPEC). Chỉ dùng thư viện chuẩn.
 #
 # Mục tiêu: tận dụng cả 2 GPU T4 trong một phiên (quota tính theo thời gian phiên).
 #   mode: parallel  → hàng đợi job, mỗi GPU một "slot", 2 job chạy đồng thời
@@ -10,11 +10,11 @@
 #                     Hợp cho: một mô hình DL lớn cần cả 2 GPU.
 #
 # Hợp đồng với script huấn luyện (biến môi trường):
-#   KRA_METRICS_PATH  nơi script ghi JSON kết quả của job, ví dụ {"cv": 0.81, ...}
-#   KRA_OUTPUT_DIR    thư mục output dùng chung (oof, checkpoint, ...)
-#   KRA_DEADLINE      epoch giây — quá mốc này phải lưu checkpoint và thoát
-#   KRA_SMOKE         "1" khi chạy thử trên CPU với dữ liệu nhỏ
-#   KRA_N_GPUS, KRA_JOB_NAME, KRA_GPU_SLOT
+#   LABRAT_METRICS_PATH  nơi script ghi JSON kết quả của job, ví dụ {"cv": 0.81, ...}
+#   LABRAT_OUTPUT_DIR    thư mục output dùng chung (oof, checkpoint, ...)
+#   LABRAT_DEADLINE      epoch giây — quá mốc này phải lưu checkpoint và thoát
+#   LABRAT_SMOKE         "1" khi chạy thử trên CPU với dữ liệu nhỏ
+#   LABRAT_N_GPUS, LABRAT_JOB_NAME, LABRAT_GPU_SLOT
 # ============================================================================
 import json as _json
 import os as _os
@@ -28,14 +28,14 @@ import time as _time
 from pathlib import Path as _Path
 
 
-def _kra_workdir():
-    w = _os.environ.get("KRA_WORKDIR")
+def _labrat_workdir():
+    w = _os.environ.get("LABRAT_WORKDIR")
     if w:
         return _Path(w)
     return _Path("/kaggle/working") if _Path("/kaggle/working").exists() else _Path.cwd() / "_local_run"
 
 
-def _kra_gpus():
+def _labrat_gpus():
     try:
         out = _sp.run(["nvidia-smi", "--query-gpu=index,name,memory.total",
                        "--format=csv,noheader,nounits"], capture_output=True, text=True, timeout=30).stdout
@@ -83,14 +83,14 @@ class _GpuSampler(_th.Thread):
         return res
 
 
-def _kra_tail(path, n=80):
+def _labrat_tail(path, n=80):
     try:
         return "\n".join(_Path(path).read_text(errors="replace").splitlines()[-n:])
     except Exception:
         return ""
 
 
-def _kra_run(name, cmd, env, cwd, log_path, hard_deadline):
+def _labrat_run(name, cmd, env, cwd, log_path, hard_deadline):
     t0 = _time.time()
     with open(log_path, "w") as log:
         log.write(f"$ {cmd}\n")
@@ -100,7 +100,7 @@ def _kra_run(name, cmd, env, cwd, log_path, hard_deadline):
         killed = False
         while p.poll() is None:
             if _time.time() > hard_deadline and not killed:
-                log.write("\n[kra] quá hạn cứng — gửi SIGTERM\n")
+                log.write("\n[labrat] quá hạn cứng — gửi SIGTERM\n")
                 log.flush()
                 _os.killpg(p.pid, _signal.SIGTERM)
                 killed = True
@@ -113,13 +113,13 @@ def _kra_run(name, cmd, env, cwd, log_path, hard_deadline):
             "seconds": round(_time.time() - t0, 1)}
 
 
-def _kra_cmd(script, args, launcher):
+def _labrat_cmd(script, args, launcher):
     return f"{launcher} {_shlex.quote(script)} {args or ''}".strip()
 
 
-def kra_main(files, spec):
+def labrat_main(files, spec):
     t0 = _time.time()
-    work = _kra_workdir()
+    work = _labrat_workdir()
     src, logs, outs = work / "src", work / "logs", work / "outputs"
     for d in (src, logs, outs):
         d.mkdir(parents=True, exist_ok=True)
@@ -133,23 +133,23 @@ def kra_main(files, spec):
     job = spec["job"]
     smoke = bool(spec.get("smoke"))
     direction = spec.get("metric_direction", job.get("metric_direction", "maximize"))
-    gpus = [] if smoke else _kra_gpus()
+    gpus = [] if smoke else _labrat_gpus()
     n_gpu = len(gpus)
     max_h = float(spec.get("max_runtime_hours", 9))
     margin = float(spec.get("safety_margin_minutes", 20)) * 60
     soft_deadline = t0 + max_h * 3600 - margin          # script nên tự dừng trước mốc này
     hard_deadline = t0 + max_h * 3600 - margin / 3      # runner sẽ SIGTERM sau mốc này
 
-    print(f"[kra] exp={spec.get('exp_id')} smoke={smoke} gpus={n_gpu} {[g['name'] for g in gpus]}")
+    print(f"[labrat] exp={spec.get('exp_id')} smoke={smoke} gpus={n_gpu} {[g['name'] for g in gpus]}")
     if not smoke and n_gpu < int(job.get("expect_gpus", 2)):
-        print(f"[kra] CẢNH BÁO: chỉ thấy {n_gpu} GPU, mong đợi {job.get('expect_gpus', 2)}")
+        print(f"[labrat] CẢNH BÁO: chỉ thấy {n_gpu} GPU, mong đợi {job.get('expect_gpus', 2)}")
 
     base_env = _os.environ.copy()
     base_env.update({
-        "KRA_SMOKE": "1" if smoke else "0",
-        "KRA_DEADLINE": str(int(soft_deadline)),
-        "KRA_OUTPUT_DIR": str(outs),
-        "KRA_N_GPUS": str(n_gpu),
+        "LABRAT_SMOKE": "1" if smoke else "0",
+        "LABRAT_DEADLINE": str(int(soft_deadline)),
+        "LABRAT_OUTPUT_DIR": str(outs),
+        "LABRAT_N_GPUS": str(n_gpu),
         "PYTHONUNBUFFERED": "1",
         "TOKENIZERS_PARALLELISM": "false",
     })
@@ -158,7 +158,7 @@ def kra_main(files, spec):
     pip = job.get("pip") or []
     if pip:
         r = _sp.run([_sys.executable, "-m", "pip", "install", "-q", *pip], capture_output=True, text=True)
-        print("[kra] pip:", "ok" if r.returncode == 0 else r.stderr[-2000:])
+        print("[labrat] pip:", "ok" if r.returncode == 0 else r.stderr[-2000:])
 
     sampler = _GpuSampler(n_gpu)
     sampler.start()
@@ -173,9 +173,9 @@ def kra_main(files, spec):
             launcher = f"torchrun --standalone --nproc_per_node={n_gpu}"
         else:
             launcher = _sys.executable
-        env = dict(base_env, KRA_JOB_NAME="main", KRA_GPU_SLOT="all",
-                   KRA_METRICS_PATH=str(outs / "metrics_main.json"))
-        results.append(_kra_run("main", _kra_cmd(script, args, launcher), env, src,
+        env = dict(base_env, LABRAT_JOB_NAME="main", LABRAT_GPU_SLOT="all",
+                   LABRAT_METRICS_PATH=str(outs / "metrics_main.json"))
+        results.append(_labrat_run("main", _labrat_cmd(script, args, launcher), env, src,
                                 logs / "main.log", hard_deadline))
     else:
         jobs = list(job.get("jobs") or [])
@@ -200,17 +200,17 @@ def kra_main(files, spec):
                     with lock:
                         results.append({"name": j["name"], "skipped": "deadline", "returncode": None})
                     continue
-                env = dict(base_env, KRA_JOB_NAME=j["name"], KRA_GPU_SLOT=str(slot),
-                           KRA_METRICS_PATH=str(outs / f"metrics_{j['name']}.json"))
+                env = dict(base_env, LABRAT_JOB_NAME=j["name"], LABRAT_GPU_SLOT=str(slot),
+                           LABRAT_METRICS_PATH=str(outs / f"metrics_{j['name']}.json"))
                 env.update({k: str(v) for k, v in (j.get("env") or {}).items()})
                 env["CUDA_VISIBLE_DEVICES"] = str(slot) if n_gpu else ""
-                res = _kra_run(j["name"], _kra_cmd(j.get("script", job.get("script")), j.get("args", ""),
+                res = _labrat_run(j["name"], _labrat_cmd(j.get("script", job.get("script")), j.get("args", ""),
                                                    _sys.executable), env, src,
                                logs / f"{j['name']}.log", hard_deadline)
                 res["gpu"] = slot if n_gpu else None
                 with lock:
                     results.append(res)
-                    print(f"[kra] xong {j['name']} (gpu {res['gpu']}) rc={res['returncode']} {res['seconds']}s")
+                    print(f"[labrat] xong {j['name']} (gpu {res['gpu']}) rc={res['returncode']} {res['seconds']}s")
 
         threads = [_th.Thread(target=worker, args=(i,)) for i in range(slots)]
         for t in threads:
@@ -220,9 +220,9 @@ def kra_main(files, spec):
 
     post = job.get("post")
     if post:
-        env = dict(base_env, KRA_JOB_NAME="post", KRA_METRICS_PATH=str(outs / "metrics_final.json"))
+        env = dict(base_env, LABRAT_JOB_NAME="post", LABRAT_METRICS_PATH=str(outs / "metrics_final.json"))
         env["CUDA_VISIBLE_DEVICES"] = ""
-        r = _kra_run("post", _kra_cmd(post["script"], post.get("args", ""), _sys.executable), env, src,
+        r = _labrat_run("post", _labrat_cmd(post["script"], post.get("args", ""), _sys.executable), env, src,
                      logs / "post.log", t0 + max_h * 3600)
         r["post"] = True
         results.append(r)
@@ -238,7 +238,7 @@ def kra_main(files, spec):
 
     for r in results:
         r["metrics"] = _load(outs / f"metrics_{r['name']}.json") if not r.get("post") else None
-        r["log_tail"] = _kra_tail(logs / f"{r['name']}.log", 40 if r.get("returncode") == 0 else 120)
+        r["log_tail"] = _labrat_tail(logs / f"{r['name']}.log", 40 if r.get("returncode") == 0 else 120)
 
     final = _load(outs / "metrics_final.json")
     train_results = [r for r in results if not r.get("post")]
@@ -273,6 +273,6 @@ def kra_main(files, spec):
         "jobs": results,
     }
     (work / "metrics.json").write_text(_json.dumps(summary, indent=2, ensure_ascii=False))
-    print(f"[kra] HOÀN TẤT ok={ok} cv={cv} wall={summary['wall_seconds']}s")
+    print(f"[labrat] HOÀN TẤT ok={ok} cv={cv} wall={summary['wall_seconds']}s")
     print(_json.dumps({k: summary[k] for k in ("ok", "cv", "cv_std", "n_gpu", "gpu_util", "wall_seconds")}))
     # luôn thoát mã 0 để Kaggle giữ output; trạng thái thật nằm ở metrics.json["ok"]

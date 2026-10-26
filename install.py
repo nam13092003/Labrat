@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Trình cài đặt Kaggle Research Agent (chạy trên VPS Linux, bằng user thường — không cần root).
+"""Trình cài đặt Labrat (chạy trên VPS Linux, bằng user thường — không cần root).
 
     python3 install.py              cài mới hoặc cấu hình lại (giữ giá trị cũ làm mặc định)
     python3 install.py --only kaggle|telegram|harness|services
@@ -45,7 +45,12 @@ def ask(prompt, default=None, secret=False, choices=None):
     while True:
         show = f" [{'đã có' if secret and default else default}]" if default else ""
         q = f"{prompt}{show}: "
-        v = getpass.getpass(q) if secret else input(q)
+        try:
+            v = getpass.getpass(q) if secret else input(q)
+        except UnicodeDecodeError:
+            # thường do bộ gõ tiếng Việt (Unikey/EVKey Telex) sửa chữ ngay trong terminal → byte UTF-8 bị cắt
+            say("  ⚠️ Ký tự lạ (bộ gõ tiếng Việt đang bật?). Tắt Unikey/EVKey (chuyển sang E) rồi nhập lại.")
+            continue
         v = v.strip() or (default or "")
         if choices and v not in choices:
             say(f"  Chọn một trong: {', '.join(choices)}")
@@ -121,10 +126,10 @@ def configure_harness(env: dict) -> dict:
     head("Chọn harness")
     for k, (_, label, _, _) in HARNESSES.items():
         say(f"  {k}. {label}")
-    cur = env.get("KRA_HARNESS")
+    cur = env.get("LABRAT_HARNESS")
     cur_key = next((k for k, v in HARNESSES.items() if v[0] == cur), "1")
     name, label, pkg, binary = HARNESSES[ask("Harness", cur_key, choices=list(HARNESSES))]
-    env["KRA_HARNESS"] = name
+    env["LABRAT_HARNESS"] = name
     h = {"harness": name, "workdir": ".", "timeout_minutes": 45, "history_turns": 8, "model": ""}
 
     if name != "custom" and ensure_node():
@@ -137,8 +142,8 @@ def configure_harness(env: dict) -> dict:
         say("  1. Anthropic API key\n  2. DeepSeek (endpoint tương thích Anthropic)\n"
             "  3. Gateway tương thích Anthropic khác (OpenRouter, LiteLLM, ...)\n"
             "  4. Đăng nhập tài khoản Claude (tự chạy `claude` một lần để đăng nhập)")
-        c = ask("Provider", env.get("KRA_PROVIDER_CHOICE", "1"), choices=["1", "2", "3", "4"])
-        env["KRA_PROVIDER_CHOICE"] = c
+        c = ask("Provider", env.get("LABRAT_PROVIDER_CHOICE", "1"), choices=["1", "2", "3", "4"])
+        env["LABRAT_PROVIDER_CHOICE"] = c
         anth = ("ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_MODEL",
                 "ANTHROPIC_DEFAULT_HAIKU_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL",
                 "CLAUDE_CODE_SUBAGENT_MODEL")
@@ -167,8 +172,8 @@ def configure_harness(env: dict) -> dict:
     elif name == "codex":
         say("  1. OpenAI API key\n  2. Đăng nhập ChatGPT (tự chạy `codex login --device-auth`)\n"
             "  3. Provider tương thích OpenAI khác (DeepSeek, OpenRouter, ...)")
-        c = ask("Provider", env.get("KRA_PROVIDER_CHOICE", "1"), choices=["1", "2", "3"])
-        env["KRA_PROVIDER_CHOICE"] = c
+        c = ask("Provider", env.get("LABRAT_PROVIDER_CHOICE", "1"), choices=["1", "2", "3"])
+        env["LABRAT_PROVIDER_CHOICE"] = c
         if c == "1":
             env["OPENAI_API_KEY"] = ask("OPENAI_API_KEY", env.get("OPENAI_API_KEY"), secret=True)
             h["model"] = ask("Model (Enter = mặc định)", "")
@@ -180,14 +185,14 @@ def configure_harness(env: dict) -> dict:
         elif c == "2":
             say("  → Sau khi cài xong, chạy `codex login --device-auth` trong terminal.")
         else:
-            pid = ask("Mã provider (chữ thường, vd deepseek)", env.get("KRA_CODEX_PROVIDER", "deepseek"))
-            base = ask("Base URL", env.get("KRA_CODEX_BASE_URL", "https://api.deepseek.com/v1"))
+            pid = ask("Mã provider (chữ thường, vd deepseek)", env.get("LABRAT_CODEX_PROVIDER", "deepseek"))
+            base = ask("Base URL", env.get("LABRAT_CODEX_BASE_URL", "https://api.deepseek.com/v1"))
             key_env = f"{pid.upper()}_API_KEY"
             env[key_env] = ask(key_env, env.get(key_env), secret=True)
-            wire = ask("wire_api (responses | chat — tùy provider hỗ trợ)", env.get("KRA_CODEX_WIRE", "responses"))
-            h["model"] = ask("Tên model", env.get("KRA_CODEX_MODEL", "deepseek-v4-pro"))
-            env.update(KRA_CODEX_PROVIDER=pid, KRA_CODEX_BASE_URL=base, KRA_CODEX_WIRE=wire,
-                       KRA_CODEX_MODEL=h["model"])
+            wire = ask("wire_api (responses | chat — tùy provider hỗ trợ)", env.get("LABRAT_CODEX_WIRE", "responses"))
+            h["model"] = ask("Tên model", env.get("LABRAT_CODEX_MODEL", "deepseek-v4-pro"))
+            env.update(LABRAT_CODEX_PROVIDER=pid, LABRAT_CODEX_BASE_URL=base, LABRAT_CODEX_WIRE=wire,
+                       LABRAT_CODEX_MODEL=h["model"])
             cdir = Path.home() / ".codex"
             cdir.mkdir(exist_ok=True)
             cfgp = cdir / "config.toml"
@@ -204,13 +209,13 @@ def configure_harness(env: dict) -> dict:
     elif name == "opencode":
         say("  OpenCode dùng key từ biến môi trường của provider (hoặc `opencode auth login`).")
         prov = ask("Provider (anthropic | openai | deepseek | openrouter | google | ...)",
-                   env.get("KRA_OPENCODE_PROVIDER", "deepseek"))
+                   env.get("LABRAT_OPENCODE_PROVIDER", "deepseek"))
         key_env = {"google": "GOOGLE_GENERATIVE_AI_API_KEY"}.get(prov, f"{prov.upper()}_API_KEY")
         key_env = ask("Tên biến chứa API key", key_env)
         env[key_env] = ask(key_env, env.get(key_env), secret=True)
-        h["model"] = ask("Model dạng provider/model (xem `opencode models`)", env.get("KRA_OPENCODE_MODEL",
+        h["model"] = ask("Model dạng provider/model (xem `opencode models`)", env.get("LABRAT_OPENCODE_MODEL",
                                                                                      f"{prov}/"))
-        env.update(KRA_OPENCODE_PROVIDER=prov, KRA_OPENCODE_MODEL=h["model"])
+        env.update(LABRAT_OPENCODE_PROVIDER=prov, LABRAT_OPENCODE_MODEL=h["model"])
 
     elif name == "dsh":
         env["DEEPSEEK_API_KEY"] = ask("DEEPSEEK_API_KEY", env.get("DEEPSEEK_API_KEY"), secret=True)
@@ -235,12 +240,12 @@ def configure_harness(env: dict) -> dict:
 def write_harness(h: dict):
     import yaml
     sys.path.insert(0, str(ROOT))
-    from kra.agent import DEFAULT_ADAPTERS
+    from labrat.agent import DEFAULT_ADAPTERS
     adapters = h.pop("adapters", None) or {h["harness"]: DEFAULT_ADAPTERS[h["harness"]]}
     h["adapters"] = adapters
     (ROOT / "harness.yaml").write_text(
         "# Sinh bởi install.py. Sửa cmd/first_cmd nếu phiên bản harness đổi cờ dòng lệnh,\n"
-        "# rồi kiểm tra: .venv/bin/python -m kra.agent --test\n"
+        "# rồi kiểm tra: .venv/bin/python -m labrat.agent --test\n"
         + yaml.safe_dump(h, allow_unicode=True, sort_keys=False), encoding="utf-8")
     # Codex / OpenCode tự nạp AGENTS.md ở thư mục gốc
     if h["harness"] in ("codex", "opencode", "custom", "dsh"):
@@ -311,7 +316,7 @@ def write_services():
     deploy.mkdir(exist_ok=True)
     path = f"{VENV}/bin:{NPM_PREFIX}/bin:/usr/local/bin:/usr/bin:/bin"
     unit = f"""[Unit]
-Description=Kaggle Research Agent — Telegram bridge
+Description=Labrat — Telegram bridge
 After=network-online.target
 Wants=network-online.target
 
@@ -321,22 +326,22 @@ WorkingDirectory={ROOT}
 EnvironmentFile={ENV_FILE}
 Environment=PATH={path}
 Environment=HOME={Path.home()}
-ExecStart={VPY} -m kra.bridge
+ExecStart={VPY} -m labrat.bridge
 Restart=always
 RestartSec=10
 
 [Install]
 WantedBy=multi-user.target
 """
-    (deploy / "kra-bridge.service").write_text(unit)
+    (deploy / "labrat-bridge.service").write_text(unit)
     cron = (f"*/15 * * * * cd {ROOT} && set -a && . ./.env && set +a && PATH={path} "
-            f"{VPY} scripts/tick_all.py >> {Path.home()}/kra-tick.log 2>&1")
+            f"{VPY} scripts/tick_all.py >> {Path.home()}/labrat-tick.log 2>&1")
     (deploy / "crontab.txt").write_text(cron + "\n")
-    say(f"  Đã ghi {deploy}/kra-bridge.service và crontab.txt")
+    say(f"  Đã ghi {deploy}/labrat-bridge.service và crontab.txt")
 
-    if yes("  Cài service kra-bridge vào systemd ngay (cần sudo)?"):
-        run(f"sudo cp {deploy}/kra-bridge.service /etc/systemd/system/ && sudo systemctl daemon-reload "
-            f"&& sudo systemctl enable kra-bridge && sudo systemctl restart kra-bridge", check=False)
+    if yes("  Cài service labrat-bridge vào systemd ngay (cần sudo)?"):
+        run(f"sudo cp {deploy}/labrat-bridge.service /etc/systemd/system/ && sudo systemctl daemon-reload "
+            f"&& sudo systemctl enable labrat-bridge && sudo systemctl restart labrat-bridge", check=False)
     if yes("  Thêm lịch cron mỗi 15 phút?"):
         cur = subprocess.run(["crontab", "-l"], capture_output=True, text=True).stdout
         if "scripts/tick_all.py" in cur:
@@ -350,19 +355,19 @@ WantedBy=multi-user.target
 def verify(env):
     head("Kiểm tra")
     e = dict(os.environ, **env, PATH=f"{VENV}/bin:{NPM_PREFIX}/bin:{os.environ['PATH']}")
-    run([str(VPY), "-m", "kra", "accounts", "--check"], check=False, env=e, cwd=ROOT)
+    run([str(VPY), "-m", "labrat", "accounts", "--check"], check=False, env=e, cwd=ROOT)
     if yes("  Gửi tin thử qua Telegram?"):
-        run([str(VPY), "-c", "from kra import telegram; print(telegram.send_message('✅ Cài đặt kra xong'))"],
+        run([str(VPY), "-c", "from labrat import telegram; print(telegram.send_message('✅ Cài đặt labrat xong'))"],
             check=False, env=e, cwd=ROOT)
     if yes("  Chạy thử một lượt harness (tốn một ít token)?"):
-        run([str(VPY), "-m", "kra.agent", "--test", "--new"], check=False, env=e, cwd=ROOT)
+        run([str(VPY), "-m", "labrat.agent", "--test", "--new"], check=False, env=e, cwd=ROOT)
 
 
 def main():
     ensure_venv()
     only = sys.argv[sys.argv.index("--only") + 1] if "--only" in sys.argv else None
     env = read_env()
-    say("Kaggle Research Agent — cài đặt. Bí mật được lưu trong .env (chmod 600).")
+    say("Labrat — cài đặt. Bí mật được lưu trong .env (chmod 600).")
     if only in (None, "harness"):
         h = configure_harness(env)
         write_env(env)
@@ -376,14 +381,25 @@ def main():
     if only in (None, "services"):
         write_services()
     verify(env)
+    try:
+        import importlib.util
+        has_pw = importlib.util.find_spec("playwright") is not None
+    except Exception:
+        has_pw = False
+    if not has_pw and yes("  Cài trình duyệt headless (Playwright, ~300 MB, cần sudo) để đọc trang web dựng bằng "
+                          "JavaScript như Kaggle?", True):
+        run([str(VPY), "-m", "pip", "install", "-q", "playwright"], check=False)
+        run(f"sudo {VENV}/bin/python -m playwright install --with-deps chromium", check=False)
+        run([str(VPY), "-m", "playwright", "install", "chromium"], check=False)
+
     head("Xong")
     drop = ROOT / "dropbox"
     drop.mkdir(exist_ok=True)
     say(f"  Thư mục thả dữ liệu: {drop}\n"
         f"    Từ Windows: scp -r .\\<thu-muc-du-lieu> {getpass.getuser()}@<IP>:{drop}/\n"
         "    hoặc WinSCP (SFTP) kéo thả. Mỗi bộ dữ liệu một thư mục con, kèm task.md. Nhắn /scan để xử lý ngay.")
-    say("  Log bridge: journalctl -u kra-bridge -f      Log cron: tail -f ~/kra-tick.log\n"
-        "  Đổi harness/provider: python3 install.py --only harness && sudo systemctl restart kra-bridge\n"
+    say("  Log bridge: journalctl -u labrat-bridge -f      Log cron: tail -f ~/labrat-tick.log\n"
+        "  Đổi harness/provider: python3 install.py --only harness && sudo systemctl restart labrat-bridge\n"
         "  Nhắn /help cho bot để bắt đầu.")
 
 

@@ -1,6 +1,6 @@
 """Cầu nối Telegram ↔ agent (long polling — không cần mở cổng, không cần domain).
 
-  python -m kra.bridge          (chạy như service systemd: kra-bridge)
+  python -m labrat.bridge          (chạy như service systemd: labrat-bridge)
 
 - Chỉ nhận tin từ TELEGRAM_CHAT_ID (mọi chat khác bị bỏ qua và ghi log).
 - Lệnh nhanh xử lý tại chỗ, không tốn LLM: /help /status /accounts /new /stop <slug> /resume <slug>
@@ -227,7 +227,7 @@ class Downloader(threading.Thread):
         if dest.exists() and any(dest.iterdir()) and not job["name"]:
             dest = root / f"{name}-{datetime.now():%m%d-%H%M}"
         mid = self.tg.send(f"⬇️ Bắt đầu tải {len(job['urls'])} link → dropbox/{dest.name}/")
-        results, errors = [], []
+        results, errors, pages = [], [], []
         for i, url in enumerate(job["urls"], 1):
             t0, label = time.time(), f"[{i}/{len(job['urls'])}]"
 
@@ -238,11 +238,23 @@ class Downloader(threading.Thread):
                                   f"→ dropbox/{dest.name}/   (/cancel để huỷ)")
             try:
                 results.append(fetcher.download(url, dest, max_gb=max_gb, progress=progress, cancel=self.cancel))
+            except fetcher.NotAFile:
+                pages.append(url)  # là trang web → để agent đọc
             except fetcher.FetchError as e:
                 errors.append(f"• {url[:80]}\n  {e}")
+        if pages:  # link hoá ra là trang web: chuyển nguyên tin nhắn cho agent đọc trang
+            note = "📄 " + ", ".join(p_[:60] for p_ in pages) + " là trang web, không phải file → chuyển cho agent đọc."
+            self.agent_q.put({"source": "telegram", "prompt": (job["text"] + "\n" + " ".join(pages)).strip()
+                              + "\n\n(Bridge: link trên là TRANG WEB — dùng `labrat page` để đọc.)"})
+            if not results:
+                self.tg.edit(mid, note + ("\n❌ Lỗi khác:\n" + "\n".join(errors) if errors else ""))
+                if dest.exists() and not any(dest.iterdir()):
+                    dest.rmdir()
+                return
+            self.tg.send(note)
         if not results:
             self.tg.edit(mid, "❌ Không tải được:\n" + "\n".join(errors))
-            if not any(dest.iterdir()):
+            if dest.exists() and not any(dest.iterdir()):
                 dest.rmdir()
             return
         task = job["text"].strip()
@@ -310,7 +322,14 @@ def main():
     dl.start()
     offset = int(OFFSET_FILE.read_text()) if OFFSET_FILE.exists() else None
     h = agent.load_harness()
-    print(f"bridge chạy: harness={h['name']} chat={tg.chat}")
+    try:
+        me = tg.call("getMe", timeout=30)
+        print(f"bridge chạy: bot=@{me.get('username')} harness={h['name']} chat={tg.chat}", flush=True)
+        if tg.call("getWebhookInfo", timeout=30).get("url"):
+            tg.call("deleteWebhook", timeout=30)  # webhook đang bật thì getUpdates không nhận được tin
+            print("đã gỡ webhook cũ của bot", flush=True)
+    except Exception as e:
+        print(f"LỖI Telegram khi khởi động (token sai?): {e}", flush=True)
     tg.send(f"🟢 Agent đã khởi động (harness: {h['name']}{' · ' + h['model'] if h['model'] else ''}). /help")
     while True:
         try:
@@ -319,7 +338,13 @@ def main():
                 params["offset"] = offset
             updates = tg.call("getUpdates", **params)
         except Exception as e:
-            print("getUpdates lỗi:", e)
+            msg = str(e)
+            if "409" in msg or "Conflict" in msg:
+                print("LỖI 409: một tiến trình KHÁC đang dùng cùng bot token (bot khác trên VPS, hoặc bridge chạy "
+                      "2 lần). Mỗi công cụ cần bot riêng. Chạy: python -m labrat.bridge --diagnose", flush=True)
+                time.sleep(30)
+                continue
+            print("getUpdates lỗi:", e, flush=True)
             time.sleep(10)
             continue
         for u in updates:
@@ -327,7 +352,8 @@ def main():
             OFFSET_FILE.write_text(str(offset))
             m = u.get("message") or {}
             if str(m.get("chat", {}).get("id")) != tg.chat:
-                print("bỏ qua chat lạ:", m.get("chat", {}).get("id"))
+                print(f"bỏ qua tin từ chat {m.get('chat', {}).get('id')} — không khớp TELEGRAM_CHAT_ID={tg.chat}. "
+                      "Nếu đó là bạn, sửa TELEGRAM_CHAT_ID trong .env rồi restart.", flush=True)
                 continue
             text = m.get("text") or m.get("caption") or ""
             files = []
@@ -396,5 +422,108 @@ def main():
             q.put({"source": "telegram", "prompt": prompt})
 
 
+# ---------------------------------------------------------------- chẩn đoán
+def diagnose() -> None:
+    """python -m labrat.bridge --diagnose — kiểm tra từng bước, không in token."""
+    import subprocess
+    load_env()
+    ok = lambda m: print("  ✅ " + m)  # noqa: E731
+    bad = lambda m: print("  ❌ " + m)  # noqa: E731
+    info = lambda m: print("  ℹ️  " + m)  # noqa: E731
+    token, chat = os.environ.get("TELEGRAM_BOT_TOKEN", ""), os.environ.get("TELEGRAM_CHAT_ID", "")
+    print("1) Cấu hình .env")
+    if not token:
+        bad("Thiếu TELEGRAM_BOT_TOKEN trong .env → chạy: python3 install.py --only telegram")
+        return
+    ok(f"có bot token (…{token[-4:]})")
+    (ok if chat else bad)(f"TELEGRAM_CHAT_ID = {chat or '(trống)'}")
+    base = f"https://api.telegram.org/bot{token}"
+
+    def call(method, **params):
+        try:
+            return requests.post(f"{base}/{method}", data=params, timeout=30).json()
+        except Exception as e:
+            return {"ok": False, "description": f"không kết nối được api.telegram.org: {e}"}
+
+    print("2) Token")
+    me = call("getMe")
+    if not me.get("ok"):
+        bad(f"Token không hợp lệ: {me.get('description')} → lấy lại token ở @BotFather, sửa .env")
+        return
+    ok(f"bot là @{me['result']['username']} — hãy chắc bạn đang nhắn đúng bot này")
+
+    print("3) Webhook")
+    wh = call("getWebhookInfo").get("result", {})
+    if wh.get("url"):
+        bad(f"Bot đang có webhook ({wh['url'][:60]}…) → getUpdates không nhận được tin. "
+            "Bridge bản mới tự gỡ khi khởi động; hoặc gỡ ngay bây giờ (đã gỡ).")
+        call("deleteWebhook")
+    else:
+        ok("không có webhook")
+
+    print("4) Service labrat-bridge")
+    try:
+        state = subprocess.run(["systemctl", "is-active", "labrat-bridge"], capture_output=True, text=True).stdout.strip()
+    except FileNotFoundError:
+        state = "unknown"
+    if state == "active":
+        ok("đang chạy")
+        info("Để kiểm tra xung đột & chat id chính xác, dừng service trước: sudo systemctl stop labrat-bridge, "
+             "nhắn bot một tin, rồi chạy lại --diagnose")
+    else:
+        (bad if state in ("failed", "inactive") else info)(f"trạng thái: {state}")
+        if state != "unknown":
+            info("Xem lỗi: journalctl -u labrat-bridge -n 50 --no-pager")
+
+    print("5) Tin nhắn đang chờ & xung đột")
+    if state != "active":
+        up = call("getUpdates", timeout=0)
+        if not up.get("ok") and "409" in str(up.get("error_code", "")) + str(up.get("description", "")):
+            bad("409 Conflict: MỘT TIẾN TRÌNH KHÁC đang poll cùng bot token (vd công cụ submit alpha, hoặc bridge "
+                "chạy tay ở terminal khác). Mỗi công cụ phải dùng bot riêng — tạo bot mới ở @BotFather.")
+        elif up.get("ok"):
+            chats = {}
+            for u in up["result"]:
+                c = (u.get("message") or {}).get("chat") or {}
+                if c:
+                    chats[str(c["id"])] = c.get("first_name") or c.get("title") or ""
+            if not chats:
+                info("Không có tin nào đang chờ. Nhắn bot một tin (bấm Start nếu là lần đầu), rồi chạy lại.")
+            for cid, name in chats.items():
+                (ok if cid == chat else bad)(f"có tin từ chat {cid} ({name})"
+                                             + ("" if cid == chat else f" ≠ TELEGRAM_CHAT_ID={chat} → sửa .env "
+                                                                       "thành giá trị này"))
+        else:
+            bad(f"getUpdates lỗi: {up.get('description')}")
+    else:
+        info("bỏ qua (service đang chạy sẽ lấy mất tin)")
+
+    print("6) Gửi tin thử tới chat id đã cấu hình")
+    if chat:
+        r = call("sendMessage", chat_id=chat, text="🔧 Tin thử từ labrat --diagnose")
+        if r.get("ok"):
+            ok("gửi được — nếu bạn THẤY tin này trên Telegram thì chat id đúng")
+        else:
+            d = r.get("description", "")
+            hint = (" → bạn chưa bấm Start với bot, hoặc chat id sai" if "chat not found" in d else
+                    " → bạn đã chặn bot, bỏ chặn rồi bấm Start" if "blocked" in d else "")
+            bad(f"không gửi được: {d}{hint}")
+
+    print("7) Log gần đây của bridge")
+    try:
+        log = subprocess.run(["journalctl", "-u", "labrat-bridge", "-n", "200", "--no-pager"],
+                             capture_output=True, text=True).stdout.splitlines()
+        hits = [l for l in log if any(k in l for k in ("LỖI", "lỗi", "Error", "Traceback", "bỏ qua tin", "409"))]
+        for l in hits[-8:]:
+            print("     " + l[-220:])
+        if not hits:
+            info("không thấy dòng lỗi" if log else "không đọc được journal (thử thêm sudo)")
+    except FileNotFoundError:
+        info("không có journalctl")
+    print("\nNếu /help trả lời được mà câu hỏi thường thì không: lỗi ở harness → "
+          ".venv/bin/python -m labrat.agent --test")
+
+
 if __name__ == "__main__":
-    main()
+    import sys as _sys
+    diagnose() if "--diagnose" in _sys.argv else main()

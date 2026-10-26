@@ -8,7 +8,7 @@ Cấu hình trong harness.yaml (trình cài đặt sinh ra). Mỗi adapter khai 
   stateless  true → harness không nhớ phiên; bridge gửi kèm lịch sử gần đây
   env        biến môi trường thêm
 Cờ dòng lệnh của các harness thay đổi theo phiên bản: nếu lệnh lỗi, sửa harness.yaml rồi
-chạy `python -m kra.agent --test`.
+chạy `python -m labrat.agent --test`.
 """
 from __future__ import annotations
 
@@ -91,7 +91,7 @@ DEFAULT_ADAPTERS = {
 # Bố cục prompt tối ưu cache tiền tố (DeepSeek cache tự động, khớp từ ĐẦU request):
 #   [STATIC: không bao giờ đổi] → [lịch sử: chỉ nối thêm trong một "epoch"] → [ĐỘNG: giờ, nguồn, tin mới]
 # Không đặt thời gian / số liệu thay đổi ở phần đầu.
-STATIC_PREFIX = """Bạn là Kaggle Research Agent, làm việc trong thư mục {workdir} theo AGENT.md.
+STATIC_PREFIX = """Bạn là Labrat, làm việc trong thư mục {workdir} theo AGENT.md.
 Câu trả lời cuối cùng của bạn được gửi NGUYÊN VĂN tới người dùng qua Telegram: viết tiếng Việt,
 ngắn gọn, có số liệu; văn bản thường (không dùng bảng Markdown).
 """
@@ -251,7 +251,7 @@ def run_agent(prompt: str, source: str = "telegram") -> dict:
         env = os.environ.copy()
         env.update({k: str(v).replace("{workdir}", h["workdir"]) for k, v in (a.get("env") or {}).items()})
         t0 = time.time()
-        with tempfile.NamedTemporaryFile(prefix="kra_reply_", suffix=".txt", delete=False) as tf:
+        with tempfile.NamedTemporaryFile(prefix="labrat_reply_", suffix=".txt", delete=False) as tf:
             outfile = tf.name
 
         def go(is_first):
@@ -299,7 +299,7 @@ def main():
         print(json.dumps({"first": build_cmd(h, "<prompt>", True, "<outfile>"),
                           "continue": build_cmd(h, "<prompt>", False, "<outfile>")}, indent=2, ensure_ascii=False))
         return
-    prompt = a.prompt or ("Kiểm tra cài đặt: chạy `python -m kra accounts` rồi trả lời một dòng: "
+    prompt = a.prompt or ("Kiểm tra cài đặt: chạy `python -m labrat accounts` rồi trả lời một dòng: "
                           "harness hoạt động, có bao nhiêu tài khoản Kaggle.") if a.test else a.prompt
     if not prompt:
         ap.error("cần prompt hoặc --test")

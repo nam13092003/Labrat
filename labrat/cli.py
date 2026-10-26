@@ -1,30 +1,31 @@
 """Giao diện dòng lệnh. Mọi lệnh in JSON (dễ cho agent đọc).
 
 Dự án
-  kra init <slug> [--kind competition|custom] [--metric AUC] [--direction maximize|minimize]
+  labrat init <slug> [--kind competition|custom] [--metric AUC] [--direction maximize|minimize]
                   [--title ...] [--gpu-hours 20]
-  kra fetch <slug> [--download]                      thông tin/dữ liệu cuộc thi (kind=competition)
+  labrat fetch <slug> [--download]                      thông tin/dữ liệu cuộc thi (kind=competition)
 Tài khoản Kaggle
-  kra accounts [--check]                             trạng thái quota & kernel từng tài khoản
+  labrat accounts [--check]                             trạng thái quota & kernel từng tài khoản
 Nghiên cứu
-  kra research <slug> "<query>" [--limit 10]         arXiv + Semantic Scholar
-  kra lit-add <slug> --title ... --url ... [--relevance 1-5] [--notes] [--tags] [--source kaggle]
-  kra paper <slug> <arxiv-id|url|pdf>                tải & trích văn bản 1 paper, tạo analysis.md
-  kra paper-report <slug> <pid> [--send]             thẻ HTML từ analysis.md
+  labrat research <slug> "<query>" [--limit 10]         arXiv + Semantic Scholar
+  labrat lit-add <slug> --title ... --url ... [--relevance 1-5] [--notes] [--tags] [--source kaggle]
+  labrat paper <slug> <arxiv-id|url|pdf>                tải & trích văn bản 1 paper, tạo analysis.md
+  labrat paper-report <slug> <pid> [--send]             thẻ HTML từ analysis.md
 Dữ liệu
-  kra get <url> [--name X]                           tải dữ liệu từ link vào dropbox/X/
-  kra dropbox [--scan [--force]]                     thư mục thả dữ liệu: liệt kê / quét mục mới
-  kra data-add <slug> <url|path> [--link]            nhận dữ liệu người dùng vào data/raw/
-  kra dataset <slug> <folder> --name X [--message]   tải lên MỌI tài khoản (dataset riêng tư)
-  kra dataset-status <slug> <name>
+  labrat page <url> [--slug X] [--follow 1]           đọc trang web (cuộc thi ngoài Kaggle, writeup...) → .md
+  labrat get <url> [--name X]                           tải dữ liệu từ link vào dropbox/X/
+  labrat dropbox [--scan [--force]]                     thư mục thả dữ liệu: liệt kê / quét mục mới
+  labrat data-add <slug> <url|path> [--link]            nhận dữ liệu người dùng vào data/raw/
+  labrat dataset <slug> <folder> --name X [--message]   tải lên MỌI tài khoản (dataset riêng tư)
+  labrat dataset-status <slug> <name>
 Thực nghiệm
-  kra new-exp <slug> --name ... --hypothesis ... [--template gbdt_folds|torch_ddp] [--parent exp-003]
-  kra push <slug> <exp> [--smoke] [--account acc2] [--skip-smoke] [--force] [--est-hours 1.5]
-  kra poll <slug> | wait <slug> | tick <slug> | status <slug> | budget <slug> | stop-check <slug>
+  labrat new-exp <slug> --name ... --hypothesis ... [--template gbdt_folds|torch_ddp] [--parent exp-003]
+  labrat push <slug> <exp> [--smoke] [--account acc2] [--skip-smoke] [--force] [--est-hours 1.5]
+  labrat poll <slug> | wait <slug> | tick <slug> | status <slug> | budget <slug> | stop-check <slug>
 Báo cáo
-  kra report <slug> [--send]
-  kra notify <slug> "<text>"
-  kra templates
+  labrat report <slug> [--send]
+  labrat notify <slug> "<text>"
+  labrat templates
 """
 from __future__ import annotations
 
@@ -99,7 +100,7 @@ def cmd_init(a):
         if not (d / name).exists():
             (d / name).write_text(json.dumps(content, indent=2, ensure_ascii=False), encoding="utf-8")
     hint = ("Mọi tài khoản Kaggle phải bấm chấp nhận luật trên trang cuộc thi."
-            if a.kind == "competition" else "Dự án custom: đưa dữ liệu lên bằng `kra data-add` + `kra dataset`.")
+            if a.kind == "competition" else "Dự án custom: đưa dữ liệu lên bằng `labrat data-add` + `labrat dataset`.")
     out({"created": str(d), "kind": a.kind, "note": hint})
 
 
@@ -168,6 +169,11 @@ def cmd_data_add(a):
     out(data.data_add(cfg, a.src, link=a.link))
 
 
+def cmd_page(a):
+    from . import pages
+    out(pages.crawl(a.url, slug=a.slug, follow=a.follow, max_pages=a.max_pages))
+
+
 def cmd_get(a):
     from . import fetcher
     cfg = load_config()
@@ -204,7 +210,7 @@ def cmd_new_exp(a):
     rec = experiments.new_experiment(cfg, name=a.name, hypothesis=a.hypothesis, template=a.template,
                                      parent=a.parent)
     out({"exp": rec["id"], "folder": str(experiments.exp_path(cfg, rec)),
-         "next": "Sửa src/ và job.yaml, rồi `kra push --smoke`"})
+         "next": "Sửa src/ và job.yaml, rồi `labrat push --smoke`"})
 
 
 def cmd_push(a):
@@ -309,7 +315,7 @@ def cmd_notify(a):
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="kra", description="Kaggle Research Agent")
+    p = argparse.ArgumentParser(prog="labrat", description="Labrat")
     sp = p.add_subparsers(dest="cmd", required=True)
 
     def add(name, fn, *slug_args):
@@ -335,6 +341,9 @@ def build_parser() -> argparse.ArgumentParser:
     s = add("data-add", cmd_data_add, "slug", "src")
     s.add_argument("--link", action="store_true", help="symlink thay vì sao chép (dữ liệu lớn trong dropbox)")
     s = add("get", cmd_get, "url"); s.add_argument("--name")
+    s = add("page", cmd_page, "url"); s.add_argument("--slug")
+    s.add_argument("--follow", type=int, default=1, help="đi tiếp bao nhiêu tầng trang con cùng site")
+    s.add_argument("--max-pages", type=int, default=12)
     s = add("dropbox", cmd_dropbox); s.add_argument("--scan", action="store_true")
     s.add_argument("--force", action="store_true", help="không chờ lần quét thứ hai")
     s = add("dataset", cmd_dataset, "slug", "folder")

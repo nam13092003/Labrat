@@ -45,7 +45,7 @@ def collect_files(src: Path) -> dict[str, str]:
         files[p.relative_to(src).as_posix()] = base64.b64encode(data).decode()
     if total > MAX_EMBED_BYTES:
         raise ValueError(f"src/ nặng {total/1e6:.1f}MB > {MAX_EMBED_BYTES/1e6:.0f}MB. "
-                         "Hãy đưa file lớn lên dataset (kra dataset) và gắn vào project.yaml.")
+                         "Hãy đưa file lớn lên dataset (labrat dataset) và gắn vào project.yaml.")
     return files
 
 
@@ -66,12 +66,12 @@ def build_bundle(exp_dir: Path, *, cfg: dict, exp: dict, username: str, smoke: b
     payload = base64.b64encode(json.dumps({"files": files, "spec": spec}).encode()).decode()
     runner = (TEMPLATES / "runner.py").read_text(encoding="utf-8")
     main_py = (
-        "# AUTO-GENERATED bởi kra — đừng sửa tay. Nguồn: experiments/" + exp_dir.name + "\n"
+        "# AUTO-GENERATED bởi labrat — đừng sửa tay. Nguồn: experiments/" + exp_dir.name + "\n"
         "import base64 as _kb64, json as _kjson\n"
-        f"_KRA = _kjson.loads(_kb64.b64decode('{payload}').decode())\n"
-        "KRA_FILES, KRA_SPEC = _KRA['files'], _KRA['spec']\n\n"
+        f"_LABRAT = _kjson.loads(_kb64.b64decode('{payload}').decode())\n"
+        "LABRAT_FILES, LABRAT_SPEC = _LABRAT['files'], _LABRAT['spec']\n\n"
         + runner
-        + "\n\nkra_main(KRA_FILES, KRA_SPEC)\n"
+        + "\n\nlabrat_main(LABRAT_FILES, LABRAT_SPEC)\n"
     )
 
     out = exp_dir / ("_bundle_cpu" if smoke else "_bundle_gpu")
@@ -80,7 +80,7 @@ def build_bundle(exp_dir: Path, *, cfg: dict, exp: dict, username: str, smoke: b
     out.mkdir(parents=True)
     (out / "main.py").write_text(main_py, encoding="utf-8")
 
-    title = kernel_title(k.get("title_prefix", "kra"), cfg["slug"], exp["id"], exp.get("name", ""), smoke)
+    title = kernel_title(k.get("title_prefix", "labrat"), cfg["slug"], exp["id"], exp.get("name", ""), smoke)
     ref = f"{username}/{title}"
     # dataset công khai/người khác: "owner/slug"; dataset riêng (đã tải lên MỌI tài khoản): chỉ "slug"
     own = list(cfg.get("own_datasets") or []) + list(job.get("own_datasets") or [])

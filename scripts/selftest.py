@@ -39,11 +39,11 @@ import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 import yaml  # noqa: E402
 
-from kra import accounts, agent, bridge, budget, data, experiments, kaggle_ops, papers, report  # noqa: E402
-from kra.bundle import build_bundle, kernel_title  # noqa: E402
-from kra.cli import main as cli  # noqa: E402
-from kra.config import comp_dir, load_config  # noqa: E402
-from kra.registry import now_iso  # noqa: E402
+from labrat import accounts, agent, bridge, budget, data, experiments, kaggle_ops, papers, report  # noqa: E402
+from labrat.bundle import build_bundle, kernel_title  # noqa: E402
+from labrat.cli import main as cli  # noqa: E402
+from labrat.config import comp_dir, load_config  # noqa: E402
+from labrat.registry import now_iso  # noqa: E402
 
 SLUG = "_selftest"
 KEEP = "--keep" in sys.argv
@@ -57,8 +57,8 @@ def check(cond, msg):
 
 
 def run_bundle_locally(bundle_dir: Path, data_dir: Path) -> dict:
-    work = Path(tempfile.mkdtemp(prefix="kra_work_"))
-    env = dict(os.environ, KRA_WORKDIR=str(work), KRA_INPUT_DIR=str(data_dir))
+    work = Path(tempfile.mkdtemp(prefix="labrat_work_"))
+    env = dict(os.environ, LABRAT_WORKDIR=str(work), LABRAT_INPUT_DIR=str(data_dir))
     r = subprocess.run([sys.executable, str(bundle_dir / "main.py")], env=env, capture_output=True,
                        text=True, timeout=900)
     print("\n".join("    " + l for l in r.stdout.strip().splitlines()[-4:]))
@@ -82,7 +82,7 @@ def restore():
 
 
 def make_data() -> Path:
-    d = Path(tempfile.mkdtemp(prefix="kra_data_"))
+    d = Path(tempfile.mkdtemp(prefix="labrat_data_"))
     rng = np.random.default_rng(0)
     n = 4000
     X = rng.normal(size=(n, 6))
@@ -117,7 +117,7 @@ def main():
 
 def _tests(data_dir: Path):
     print("1) tên kernel + tài khoản")
-    t = kernel_title("kra", "playground-series-s6e1", "exp-012", "Target encoding + DART, 2 seeds", False)
+    t = kernel_title("labrat", "playground-series-s6e1", "exp-012", "Target encoding + DART, 2 seeds", False)
     check(5 <= len(t) <= 50 and t == t.lower() and " " not in t, f"title hợp lệ: {t}")
     cfg0 = load_config()
     accs = accounts.load_accounts(cfg0)
@@ -269,7 +269,7 @@ def _tests(data_dir: Path):
           "dataset tải lên mọi tài khoản; kernel của user3 gắn user3/churn-data")
 
     print("7b) thư mục thả dữ liệu")
-    from kra import dropbox
+    from labrat import dropbox
     import time as _t
     drop = dropbox.dropbox_dir()
     item = drop / "zz-selftest-drop"
@@ -303,7 +303,7 @@ def _tests(data_dir: Path):
     import queue as _q
     import socketserver
     import threading
-    from kra import fetcher
+    from labrat import fetcher
     srv_dir = Path(tempfile.mkdtemp())
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
@@ -349,6 +349,54 @@ def _tests(data_dir: Path):
         shutil.rmtree(dropbox.dropbox_dir() / "zz-churn", ignore_errors=True)
         dropbox.scan()
 
+    print("7d) đọc trang web cuộc thi ngoài Kaggle")
+    from labrat import pages
+    site = Path(tempfile.mkdtemp()) / "2027"
+    site.mkdir()
+    nav = '<nav><a href="description.html">Mô tả</a> <a href="data.html">Data</a> <a href="rules.html">Rules</a></nav>'
+    (site / "description.html").write_text(
+        f"<html><head><title>XACLE 2027 Challenge</title></head><body>{nav}<main><h1>Task description</h1>"
+        "<p>Predict the audio-text alignment score for each clip. " + "Context sentence. " * 40 + "</p>"
+        "<h2>Evaluation</h2><p>Submissions are ranked by Spearman correlation (SRCC).</p>"
+        "<ul><li>Baseline: 0.334</li><li>Team limit: 5</li></ul>"
+        '<a href="https://other-site.org/x.html">bên ngoài</a></main></body></html>', encoding="utf-8")
+    (site / "data.html").write_text(
+        f"<html><head><title>Data</title></head><body>{nav}<main><h1>Dataset</h1><p>" + "Info. " * 80 +
+        '</p><a href="files/train.zip">train.zip</a> <a href="https://drive.google.com/file/d/1AbCdEfGhIjKlMn/view">'
+        "dev set</a><table><tr><th>split</th><th>clips</th></tr><tr><td>train</td><td>7500</td></tr></table>"
+        "</main></body></html>", encoding="utf-8")
+    (site / "rules.html").write_text(f"<html><head><title>Rules</title></head><body>{nav}<main><h1>Rules</h1><p>"
+                                     + "External data allowed if public. " * 20 + "</p></main></body></html>",
+                                     encoding="utf-8")
+    srv2 = socketserver.TCPServer(("127.0.0.1", 0), functools.partial(_H, directory=str(site.parent)))
+    threading.Thread(target=srv2.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv2.server_address[1]}/2027"
+    try:
+        msg = f"nghiên cứu cuộc thi {base}/description.html với ngân sách 15h GPU"
+        dl_links, other = fetcher.data_urls(msg)
+        check(not dl_links and other, "link trang web → chuyển agent, KHÔNG đưa bộ tải file")
+        res = pages.crawl(f"{base}/description.html", slug=SLUG, follow=1)
+        titles = sorted(p_["title"] for p_ in res["pages"])
+        check(titles == ["Data", "Rules", "XACLE 2027 Challenge"], f"đọc 3 trang cùng site: {titles}")
+        txt = Path(next(p_["file"] for p_ in res["pages"] if p_["title"].startswith("XACLE"))).read_text()
+        check("## Evaluation" in txt and "Spearman" in txt and "- Baseline: 0.334" in txt,
+              "giữ cấu trúc: tiêu đề, danh sách, metric")
+        dtxt = Path(next(p_["file"] for p_ in res["pages"] if p_["title"] == "Data")).read_text()
+        check("train | 7500" in dtxt, "bảng → dòng 'a | b'")
+        check(any(u.endswith("files/train.zip") for u in res["data_links"])
+              and any("drive.google.com" in u for u in res["data_links"])
+              and not any("other-site" in u for u in res["data_links"]),
+              f"gom link dữ liệu: {len(res['data_links'])} link (zip + Drive), bỏ link ngoài site")
+        tg2, aq2 = FakeTG(), _q.Queue()
+        bridge.Downloader(tg2, aq2)._do({"urls": [f"{base}/description.html"], "text": "/get thử", "name": "zz-web"})
+        fwd = aq2.get_nowait()
+        check("labrat page" in fwd["prompt"] and any("trang web" in m_ for m_ in tg2.msgs)
+              and not (dropbox.dropbox_dir() / "zz-web").exists(),
+              "/get vào trang web → chuyển agent đọc, không báo lỗi cụt")
+    finally:
+        srv2.shutdown()
+        shutil.rmtree(site.parent, ignore_errors=True)
+
     print("8) bridge + agent")
     check("/status" in bridge.handle_quick("/help"), "/help")
     check("Đã tạm dừng" in bridge.handle_quick(f"/stop {SLUG}") and load_config(SLUG).get("paused"), "/stop")
@@ -383,7 +431,7 @@ def _tests(data_dir: Path):
         agent.run_agent(f"tin nhắn số {i}", source="selftest")
     ps = [json.loads(l) for l in cap.read_text().splitlines()]
     dyn = [p_[:p_.index("\n[")] for p_ in ps]  # phần trước khối động (giờ/nguồn)
-    check(all("[" not in d.split("\n")[0] for d in dyn) and ps[0].startswith("Bạn là Kaggle Research Agent"),
+    check(all("[" not in d.split("\n")[0] for d in dyn) and ps[0].startswith("Bạn là Labrat"),
           "giờ / nguồn nằm ở CUỐI prompt, không ở đầu")
     grow = [ps[i + 1].startswith(dyn[i]) for i in range(len(ps) - 1)]
     check(sum(grow) >= 4, f"lượt sau giữ nguyên tiền tố của lượt trước ({sum(grow)}/{len(grow)} cặp; "

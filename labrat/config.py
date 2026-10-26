@@ -7,7 +7,7 @@ from pathlib import Path
 
 import yaml
 
-ROOT = Path(os.environ.get("KRA_ROOT", Path(__file__).resolve().parent.parent))
+ROOT = Path(os.environ.get("LABRAT_ROOT", Path(__file__).resolve().parent.parent))
 TEMPLATES = ROOT / "templates"
 
 

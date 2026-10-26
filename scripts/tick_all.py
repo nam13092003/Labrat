@@ -2,16 +2,16 @@
 
 Đánh thức agent khi:
   - có thí nghiệm vừa kết thúc (thành công / lỗi / smoke xong), hoặc
-  - còn tài khoản GPU rảnh, chưa dừng, và đã quá KRA_IDLE_HOURS (mặc định 3) kể từ lần đánh thức trước
+  - còn tài khoản GPU rảnh, chưa dừng, và đã quá LABRAT_IDLE_HOURS (mặc định 3) kể từ lần đánh thức trước
     (phòng khi agent quên đẩy thí nghiệm tiếp theo).
 Mặc định "đánh thức" = thả vào .wake_queue/ để bridge Telegram gọi agent và gửi trả lời.
-Có thể thay bằng lệnh riêng qua biến KRA_WAKE_CMD (thông điệp ở biến KRA_WAKE_MSG).
+Có thể thay bằng lệnh riêng qua biến LABRAT_WAKE_CMD (thông điệp ở biến LABRAT_WAKE_MSG).
 Cũng quét thư mục dropbox: dữ liệu mới/cập nhật đã chép xong → báo Telegram + giao agent.
 Dự án `paused: true` vẫn được thu kết quả nhưng không bị đánh thức để đẩy thí nghiệm mới.
 Bỏ qua dự án chưa có thí nghiệm nào và thư mục bắt đầu bằng "_".
 
 Cron ví dụ (mỗi 15 phút):
-  */15 * * * * /home/kra/kaggle-research-agent/.venv/bin/python /home/kra/kaggle-research-agent/scripts/tick_all.py >> /home/kra/kra-tick.log 2>&1
+  */15 * * * * /home/labrat/Labrat/.venv/bin/python /home/labrat/Labrat/scripts/tick_all.py >> /home/labrat/labrat-tick.log 2>&1
 """
 import json
 import os
@@ -24,16 +24,16 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from kra import budget, dropbox, experiments, telegram  # noqa: E402
-from kra.cli import _notify_events  # noqa: E402
-from kra.config import competitions_root, load_config  # noqa: E402
+from labrat import budget, dropbox, experiments, telegram  # noqa: E402
+from labrat.cli import _notify_events  # noqa: E402
+from labrat.config import competitions_root, load_config  # noqa: E402
 
-IDLE_H = float(os.environ.get("KRA_IDLE_HOURS", "3"))
+IDLE_H = float(os.environ.get("LABRAT_IDLE_HOURS", "3"))
 STATE = ROOT / ".tick_state.json"
 
 
 def enqueue(key: str, msg: str) -> None:
-    cmd = os.environ.get("KRA_WAKE_CMD")
+    cmd = os.environ.get("LABRAT_WAKE_CMD")
     if not cmd:  # mặc định: thả vào hàng đợi để bridge Telegram gọi agent
         wq = ROOT / ".wake_queue"
         wq.mkdir(exist_ok=True)
@@ -41,14 +41,14 @@ def enqueue(key: str, msg: str) -> None:
                                                                            ensure_ascii=False))
         print(f"  wake → hàng đợi: {msg[:160]}")
         return
-    r = subprocess.run(cmd, shell=True, env=dict(os.environ, KRA_WAKE_MSG=msg, KRA_SLUG=key),
+    r = subprocess.run(cmd, shell=True, env=dict(os.environ, LABRAT_WAKE_MSG=msg, LABRAT_SLUG=key),
                        capture_output=True, text=True, timeout=300)
     print(f"  wake rc={r.returncode} {(r.stdout + r.stderr)[-300:]}")
 
 
 def wake(slug: str, reason: str, state: dict) -> None:
     state[slug] = time.time()
-    enqueue(slug, f"tick {slug}: {reason}. Đọc `python -m kra tick {slug}` / registry rồi làm bước tiếp theo "
+    enqueue(slug, f"tick {slug}: {reason}. Đọc `python -m labrat tick {slug}` / registry rồi làm bước tiếp theo "
                   f"theo AGENT.md.")
 
 

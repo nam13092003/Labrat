@@ -28,10 +28,10 @@ ap.add_argument("--seed", type=int, default=42)
 ap.add_argument("--num-workers", type=int, default=2)
 args = ap.parse_args()
 
-SMOKE = os.environ.get("KRA_SMOKE") == "1"
-OUT = Path(os.environ.get("KRA_OUTPUT_DIR", "outputs"))
+SMOKE = os.environ.get("LABRAT_SMOKE") == "1"
+OUT = Path(os.environ.get("LABRAT_OUTPUT_DIR", "outputs"))
 OUT.mkdir(parents=True, exist_ok=True)
-DEADLINE = float(os.environ.get("KRA_DEADLINE", "inf"))
+DEADLINE = float(os.environ.get("LABRAT_DEADLINE", "inf"))
 CKPT = OUT / "checkpoint.pt"
 
 # ---------------- khởi tạo phân tán ----------------
@@ -172,7 +172,7 @@ for epoch in range(start_epoch, args.epochs):
         break
 
 if MAIN:
-    Path(os.environ.get("KRA_METRICS_PATH", OUT / "metrics_local.json")).write_text(json.dumps({
+    Path(os.environ.get("LABRAT_METRICS_PATH", OUT / "metrics_local.json")).write_text(json.dumps({
         "cv": best, "history": history, "world_size": WORLD, "stopped": stopped,
         "minutes": round((time.time() - t0) / 60, 1), "amp_fp16": USE_AMP,
     }, indent=2))

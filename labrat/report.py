@@ -221,7 +221,7 @@ def build(cfg: dict) -> Path:
 <div class="card"><h2>Tài khoản Kaggle (quota tuần)</h2>{_accounts(bud['accounts'])}</div>
 <div class="card"><h2>Sử dụng 2 GPU (lần chạy gần nhất)</h2>{_gpu_bars(last_util)}</div>
 <div class="card"><h2>Tài liệu chính ({len(lit['items'])} mục)</h2><ul>{lit_html}</ul></div>
-<footer>Kaggle Research Agent · tạo lúc {now}</footer></div></body></html>"""
+<footer>Labrat · tạo lúc {now}</footer></div></body></html>"""
 
     out_dir = cdir / "reports"
     out_dir.mkdir(exist_ok=True)

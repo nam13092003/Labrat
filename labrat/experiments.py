@@ -62,11 +62,11 @@ def push(cfg: dict, exp_id: str, *, smoke: bool, force: bool = False, skip_smoke
     est = est_hours or budget.typical_run_hours(reg)
 
     if exp.get("status") in ACTIVE and not force:
-        raise SystemExit(f"{exp_id} đang chạy ({exp['status']}). Dùng `kra poll` trước.")
+        raise SystemExit(f"{exp_id} đang chạy ({exp['status']}). Dùng `labrat poll` trước.")
     if not smoke:
         if exp.get("status") not in ("smoke_ok", "complete", "error") and not (skip_smoke or force):
             raise SystemExit(f"{exp_id} chưa qua smoke test (trạng thái {exp.get('status')}). "
-                             "Chạy `kra push --smoke` trước, hoặc thêm --skip-smoke.")
+                             "Chạy `labrat push --smoke` trước, hoặc thêm --skip-smoke.")
         chk = budget.stop_check(cfg, reg, est)
         if (chk["stop"] or chk["pause_until_reset"]) and not force:
             raise SystemExit("Không đẩy: " + "; ".join(chk["reasons"]))

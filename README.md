@@ -1,4 +1,6 @@
-# Kaggle Research Agent (kra)
+# Labrat 🐀
+
+*Chuột thí nghiệm chạy thí nghiệm không ngừng nghỉ — trợ lý nghiên cứu học máy tự động trên GPU Kaggle.*
 
 Bạn giao việc qua **Telegram**, agent tự làm phần còn lại trên GPU Kaggle (2×T4):
 
@@ -15,10 +17,10 @@ kernel GPU, có quota tuần riêng, và agent tự chọn tài khoản đang r�
 | Thành phần | Vai trò |
 |---|---|
 | `install.py` | Trình cài đặt hỏi đáp: harness, API provider, tài khoản Kaggle, Telegram, systemd, cron |
-| `kra/bridge.py` | Service Telegram (long polling, không mở cổng): nhận tin/file → gọi harness → trả lời |
-| `kra/agent.py` + `harness.yaml` | Gọi harness ở chế độ headless: Claude Code, Codex, OpenCode, DeepSeek Harness, hoặc lệnh tùy chỉnh |
+| `labrat/bridge.py` | Service Telegram (long polling, không mở cổng): nhận tin/file → gọi harness → trả lời |
+| `labrat/agent.py` + `harness.yaml` | Gọi harness ở chế độ headless: Claude Code, Codex, OpenCode, DeepSeek Harness, hoặc lệnh tùy chỉnh |
 | `AGENT.md` | Sổ tay vận hành, nạp làm system prompt (Claude Code) hoặc `AGENTS.md` (Codex/OpenCode) |
-| `python -m kra …` | Bộ lệnh agent gọi: dự án, tài khoản, nghiên cứu, paper, dữ liệu, thực nghiệm, báo cáo |
+| `python -m labrat …` | Bộ lệnh agent gọi: dự án, tài khoản, nghiên cứu, paper, dữ liệu, thực nghiệm, báo cáo |
 | `templates/runner.py` | Chạy trong kernel: chia việc cho 2 GPU (`parallel` / `ddp`), đo % sử dụng GPU |
 | `scripts/tick_all.py` | Cron 15 phút: thu kết quả kernel, đánh thức agent khi có sự kiện hoặc còn GPU rảnh |
 
@@ -26,9 +28,13 @@ kernel GPU, có quota tuần riêng, và agent tự chọn tài khoản đang r�
 
 ```bash
 sudo apt update && sudo apt install -y python3-venv python3-pip git unzip curl
-unzip kaggle-research-agent.zip && cd kaggle-research-agent
+git clone https://github.com/nam13092003/Labrat.git && cd Labrat
 python3 install.py
 ```
+
+Cập nhật sau này: `git pull`. Các file cấu hình, dữ liệu và kết quả (`.env`, `harness.yaml`, `competitions/`,
+`dropbox/`, `inbox/`) nằm trong `.gitignore` nên không bị ghi đè. Sau đó chạy
+`.venv/bin/pip install -r requirements.txt && sudo systemctl restart labrat-bridge`.
 
 Trình cài đặt hỏi lần lượt:
 
@@ -41,17 +47,17 @@ Trình cài đặt hỏi lần lượt:
    - **DeepSeek Harness:** `DEEPSEEK_API_KEY`.
 3. **Tài khoản Kaggle:** số lượng, username và token của từng tài khoản.
 4. **Telegram:** bot token. Chat id được tự tìm sau khi bạn nhắn bot một tin.
-5. **Dịch vụ:** cài service `kra-bridge` (systemd) và cron 15 phút, rồi kiểm tra đăng nhập Kaggle, gửi tin Telegram
+5. **Dịch vụ:** cài service `labrat-bridge` (systemd) và cron 15 phút, rồi kiểm tra đăng nhập Kaggle, gửi tin Telegram
    thử, và chạy một lượt harness thử.
 
 Đổi harness hoặc provider sau này:
 
 ```bash
-python3 install.py --only harness && sudo systemctl restart kra-bridge
+python3 install.py --only harness && sudo systemctl restart labrat-bridge
 ```
 
-Cờ dòng lệnh của các harness thay đổi theo phiên bản. Nếu `python -m kra.agent --test` báo lỗi, sửa `cmd` hoặc
-`first_cmd` trong `harness.yaml`, và xem lệnh đã sinh bằng `.venv/bin/python -m kra.agent --show-cmd`.
+Cờ dòng lệnh của các harness thay đổi theo phiên bản. Nếu `python -m labrat.agent --test` báo lỗi, sửa `cmd` hoặc
+`first_cmd` trong `harness.yaml`, và xem lệnh đã sinh bằng `.venv/bin/python -m labrat.agent --show-cmd`.
 
 ## Dùng qua Telegram
 
@@ -59,6 +65,7 @@ Cờ dòng lệnh của các harness thay đổi theo phiên bản. Nếu `pytho
 /help  /status  /accounts  /usage  /new  /stop <slug>  /resume <slug>  /dropbox  /scan  /get <link>  /cancel
 
 Nghiên cứu cuộc thi https://www.kaggle.com/competitions/playground-series-s6e1, ngân sách 15h GPU
+Nghiên cứu cuộc thi https://xacle.org/2027/description.html, ngân sách 15h GPU   (cuộc thi ngoài Kaggle)
 Đọc paper 2406.12345 và đề xuất hướng thực nghiệm cho bài phân loại ảnh y tế
 [gửi file train.csv] Đây là dữ liệu dự đoán churn, metric AUC, ngân sách 10h
 https://huggingface.co/datasets/<org>/<tên>  phân loại cảm xúc, metric F1-macro
@@ -87,8 +94,10 @@ tên: churn-2026
 - **Sau khi tải xong:** tự giải nén zip/tar, phần chữ của tin nhắn được ghi thành `task.md`, rồi dữ liệu được giao
   cho agent.
 - **Giới hạn:** mặc định 50 GB mỗi lần (`downloads.max_gb`). Trước khi tải còn kiểm tra ổ trống.
-- **Link không phải dữ liệu:** link cuộc thi Kaggle, arXiv và PDF được chuyển cho agent như tin nhắn thường
-  (để nghiên cứu cuộc thi hoặc paper).
+- **Link không phải dữ liệu:** trang web (vd trang mô tả cuộc thi), link cuộc thi Kaggle, arXiv và PDF được chuyển
+  cho agent như tin nhắn thường. Agent đọc trang web bằng `labrat page`, tự đi tiếp sang các trang con (Data, Rules...)
+  và gom link dữ liệu tìm thấy. Chỉ link rõ ràng là file (đuôi `.csv`, `.zip`, `.parquet`…, hoặc Drive/HF/Kaggle dataset)
+  mới được tự tải.
 - Có thể dùng lệnh rõ ràng: `/get <link> [tên-thư-mục]`.
 
 ## Thư mục thả dữ liệu (dropbox)
@@ -108,10 +117,10 @@ dropbox/
 Từ Windows:
 
 ```powershell
-scp -r .\churn-2026 kra@<IP>:~/kaggle-research-agent/dropbox/
+scp -r .\churn-2026 labrat@<IP>:~/Labrat/dropbox/
 ```
 
-Nếu muốn kéo thả, dùng WinSCP (giao thức SFTP, user `kra`) và mở thư mục `kaggle-research-agent/dropbox`.
+Nếu muốn kéo thả, dùng WinSCP (giao thức SFTP, user `labrat`) và mở thư mục `Labrat/dropbox`.
 
 Sau khi chép xong, cron sẽ phát hiện trong vòng 15–30 phút. Muốn xử lý ngay thì nhắn `/scan`.
 
@@ -122,7 +131,7 @@ Sau khi chép xong, cron sẽ phát hiện trong vòng 15–30 phút. Muốn x�
   bổ sung cho dự án đó.
 - **Dữ liệu gốc:** không bị di chuyển hay xoá, agent chỉ đọc hoặc tạo symlink.
 - **Xem trạng thái:** nhắn `/dropbox`.
-- **Đổi vị trí:** sửa `paths.dropbox` trong `config.yaml`, ví dụ `/home/kra/kra-dropbox`. Thư mục nằm ngoài project
+- **Đổi vị trí:** sửa `paths.dropbox` trong `config.yaml`, ví dụ `/home/labrat/labrat-dropbox`. Thư mục nằm ngoài project
   thì khi cập nhật code không phải lo giữ lại.
 
 Cần nhớ:
@@ -137,10 +146,10 @@ Cần nhớ:
 - `mode: parallel` (template `gbdt_folds`): hàng đợi job, mỗi GPU một slot. Dùng cho fold, A/B, seed.
 - `mode: ddp` (template `torch_ddp`): `torchrun --nproc_per_node=2`, AMP fp16, checkpoint, deadline đồng bộ giữa các rank.
 
-**Giữa các tài khoản.** `kra push` tự chọn tài khoản rảnh còn nhiều quota nhất. Với 3 tài khoản có thể chạy 3 thí
+**Giữa các tài khoản.** `labrat push` tự chọn tài khoản rảnh còn nhiều quota nhất. Với 3 tài khoản có thể chạy 3 thí
 nghiệm đồng thời, tức 6 GPU T4.
 
-`kra/budget.py` cộng giờ GPU theo từng tài khoản (quota reset 00:00 UTC thứ Bảy). Trần dự án được tính tổng trên mọi
+`labrat/budget.py` cộng giờ GPU theo từng tài khoản (quota reset 00:00 UTC thứ Bảy). Trần dự án được tính tổng trên mọi
 tài khoản, và kernel đang chạy được giữ chỗ theo thời gian ước tính.
 
 ## Chi phí LLM và cache
@@ -164,13 +173,13 @@ sắp xếp để giữ phần đầu request ổn định:
 ## Vận hành
 
 ```bash
-journalctl -u kra-bridge -f          # log bridge + agent
-tail -f ~/kra-tick.log               # log cron
-.venv/bin/python -m kra accounts --check
+journalctl -u labrat-bridge -f          # log bridge + agent
+tail -f ~/labrat-tick.log               # log cron
+.venv/bin/python -m labrat accounts --check
 .venv/bin/python scripts/selftest.py # kiểm tra offline
+.venv/bin/python -m labrat.bridge --diagnose   # bot không trả lời? (dừng service trước để kiểm tra đầy đủ)
 ```
 
 - **Bí mật:** nằm trong `.env` (chmod 600) và `.kaggle_accounts/`, cả hai đều trong `.gitignore`. Harness chạy với
   quyền của user VPS và đọc được `.env`, nên hãy dùng một user riêng cho agent.
-- **Cập nhật code:** giải nén đè, nhưng giữ `.env`, `harness.yaml`, `competitions/`, `inbox/` và `dropbox/`. Sau đó chạy
-  `sudo systemctl restart kra-bridge`.
+- **Cập nhật code:** `git pull && .venv/bin/pip install -r requirements.txt && sudo systemctl restart labrat-bridge`.

@@ -19,14 +19,14 @@ CONFIG = {
 }
 # ===============================================================================
 
-SMOKE = os.environ.get("KRA_SMOKE") == "1"
-OUT = Path(os.environ.get("KRA_OUTPUT_DIR", "outputs"))
+SMOKE = os.environ.get("LABRAT_SMOKE") == "1"
+OUT = Path(os.environ.get("LABRAT_OUTPUT_DIR", "outputs"))
 OUT.mkdir(parents=True, exist_ok=True)
 
 
 def find_input(name: str) -> str:
     """Tìm file trong /kaggle/input (đường dẫn mount có thể thay đổi theo thời gian)."""
-    roots = [os.environ.get("KRA_INPUT_DIR"), "/kaggle/input", "data"]
+    roots = [os.environ.get("LABRAT_INPUT_DIR"), "/kaggle/input", "data"]
     for r in filter(None, roots):
         hits = glob.glob(os.path.join(r, "**", name), recursive=True)
         if hits:
@@ -76,6 +76,6 @@ def score(y_true, pred) -> float:
 
 
 def write_metrics(d: dict):
-    path = os.environ.get("KRA_METRICS_PATH", str(OUT / "metrics_local.json"))
+    path = os.environ.get("LABRAT_METRICS_PATH", str(OUT / "metrics_local.json"))
     Path(path).write_text(json.dumps(d, indent=2))
     print("[metrics]", json.dumps(d))

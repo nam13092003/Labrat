@@ -1,4 +1,4 @@
-"""Tải dữ liệu từ đường dẫn người dùng gửi (qua Telegram hoặc `kra get`).
+"""Tải dữ liệu từ đường dẫn người dùng gửi (qua Telegram hoặc `labrat get`).
 
 Hỗ trợ:
   Google Drive  file (drive.google.com/file/d/…, open?id=…, uc?id=…) và thư mục (drive/folders/…, ≤ 50 file/lần)
@@ -31,12 +31,24 @@ from .bundle import slugify
 
 URL_RE = re.compile(r"https?://[^\s<>\"')\]]+")
 ARCHIVES = (".zip", ".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tar.xz")
-UA = {"User-Agent": "Mozilla/5.0 (kaggle-research-agent)"}
+UA = {"User-Agent": "Mozilla/5.0 (Labrat)"}
 MIN_FREE_GB = 2.0
 
 
 class FetchError(RuntimeError):
     pass
+
+
+class NotAFile(FetchError):
+    """Link trả về trang web (HTML) chứ không phải file dữ liệu."""
+
+
+# Đuôi file coi là dữ liệu. Link chung chung (không thuộc host dữ liệu đã biết) chỉ được TỰ TẢI khi có đuôi này;
+# còn lại coi là trang web và chuyển cho agent đọc (vd trang mô tả cuộc thi ngoài Kaggle).
+DATA_EXT = (".csv", ".tsv", ".parquet", ".feather", ".arrow", ".json", ".jsonl", ".ndjson", ".xlsx", ".xls",
+            ".npz", ".npy", ".h5", ".hdf5", ".pkl", ".pickle", ".pt", ".pth", ".safetensors", ".bin", ".txt",
+            ".wav", ".flac", ".mp3", ".mp4", ".jpg", ".jpeg", ".png", ".tif", ".tiff", ".nii", ".gz", ".7z",
+            ".rar") + ARCHIVES
 
 
 # ---------------------------------------------------------------- nhận diện link
@@ -88,7 +100,9 @@ def classify(url: str) -> tuple[str, dict]:
         if len(parts) == 2 or (len(parts) >= 2 and parts[2] == "tree"):
             return "direct", {"url": f"https://github.com/{parts[0]}/{parts[1]}/archive/HEAD.zip",
                               "filename": f"{parts[1]}.zip"}
-    return "direct", {"url": url}
+    if unquote(path).lower().endswith(DATA_EXT):
+        return "direct", {"url": url}
+    return "webpage", {}
 
 
 def data_urls(text: str) -> tuple[list[str], list[str]]:
@@ -97,7 +111,7 @@ def data_urls(text: str) -> tuple[list[str], list[str]]:
     for url in URL_RE.findall(text or ""):
         url = url.rstrip(".,;")
         kind, _ = classify(url)
-        (other if kind in ("competition", "paper", "unknown") else data).append(url)
+        (other if kind in ("competition", "paper", "unknown", "webpage") else data).append(url)
     return data, other
 
 
@@ -170,8 +184,8 @@ def _stream(r: requests.Response, part: Path, ctype: str, max_bytes: int, cancel
     with open(part, "wb") as f:
         for chunk in r.iter_content(1 << 20):
             if first and "text/html" in ctype and chunk.lstrip()[:15].lower().startswith((b"<!doctype", b"<html")):
-                raise FetchError("Link trả về một trang web chứ không phải file. Hãy gửi link tải trực tiếp "
-                                 "(hoặc bật chia sẻ công khai).")
+                raise NotAFile("Link trả về một trang web chứ không phải file (nếu là file trên Drive/Dropbox: "
+                               "bật chia sẻ công khai).")
             first = False
             f.write(chunk)
             written += len(chunk)
@@ -212,6 +226,8 @@ def download(url: str, dest: Path, *, max_gb: float = 50, progress=None,
     kind, info = classify(url)
     if kind in ("competition", "paper", "unknown"):
         raise FetchError(f"Link loại '{kind}' không phải dữ liệu để tải; agent sẽ xử lý.")
+    if kind == "webpage":  # /get với link trang web: vẫn thử tải (có thể là file không có đuôi)
+        kind, info = "direct", {"url": url}
     _check_space(dest, None, max_bytes)
     before = _dir_bytes(dest)
 

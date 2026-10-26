@@ -1,7 +1,7 @@
 """Nhận dữ liệu từ người dùng và đưa lên Kaggle cho MỌI tài khoản.
 
-  kra data-add <slug> <url|đường dẫn>     tải về / sao chép vào competitions/<slug>/data/raw/, tự giải nén
-  kra dataset  <slug> <thư mục> --name X  tải thư mục lên thành dataset riêng tư <username>/X
+  labrat data-add <slug> <url|đường dẫn>     tải về / sao chép vào competitions/<slug>/data/raw/, tự giải nén
+  labrat dataset  <slug> <thư mục> --name X  tải thư mục lên thành dataset riêng tư <username>/X
                                           trên TẤT CẢ tài khoản, ghi X vào project.yaml (own_datasets)
 
 Dataset riêng tư của tài khoản A không đọc được từ kernel của tài khoản B, nên mỗi tài khoản
@@ -42,7 +42,7 @@ def _download(url: str, dest_dir: Path) -> Path:
         return Path(out)
     name = Path(urlparse(url).path).name or "download.bin"
     path = dest_dir / name
-    with requests.get(url, stream=True, timeout=600, headers={"User-Agent": "kra/0.2"}) as r:
+    with requests.get(url, stream=True, timeout=600, headers={"User-Agent": "labrat/0.2"}) as r:
         r.raise_for_status()
         with open(path, "wb") as f:
             for chunk in r.iter_content(1 << 20):

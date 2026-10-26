@@ -1,7 +1,7 @@
 """Tìm paper liên quan (arXiv + Semantic Scholar) và lưu vào literature.json.
 
 Lời giải top của các cuộc thi Kaggle cũ (writeup, discussion) thường giá trị hơn paper —
-agent tìm bằng web search của harness rồi ghi vào bằng `kra lit-add`.
+agent tìm bằng web search của harness rồi ghi vào bằng `labrat lit-add`.
 """
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ import requests
 
 from .registry import now_iso
 
-UA = {"User-Agent": "kaggle-research-agent/0.1"}
+UA = {"User-Agent": "Labrat/0.1"}
 
 
 def search_arxiv(query: str, limit: int = 10) -> list[dict]:
