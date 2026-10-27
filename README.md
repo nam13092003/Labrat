@@ -1,6 +1,5 @@
 # Labrat 🐀
 
-*Chuột thí nghiệm chạy thí nghiệm không ngừng nghỉ — trợ lý nghiên cứu học máy tự động trên GPU Kaggle.*
 
 Bạn giao việc qua **Telegram**, agent tự làm phần còn lại trên GPU Kaggle (2×T4):
 
