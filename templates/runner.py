@@ -15,6 +15,10 @@
 #   LABRAT_DEADLINE      epoch giây — quá mốc này phải lưu checkpoint và thoát
 #   LABRAT_SMOKE         "1" khi chạy thử trên CPU với dữ liệu nhỏ
 #   LABRAT_N_GPUS, LABRAT_JOB_NAME, LABRAT_GPU_SLOT
+#   LABRAT_SCRATCH    thư mục tạm KHÔNG được lưu làm output (mô hình pretrained, cache đặc trưng...)
+#
+# Cuối phiên, file > output_max_mb trong /kaggle/working bị chuyển sang LABRAT_SCRATCH (trừ khi khớp
+# job.yaml `keep_outputs`) để Kaggle không lưu chúng làm output và VPS không phải tải về.
 # ============================================================================
 import json as _json
 import os as _os
@@ -83,6 +87,31 @@ class _GpuSampler(_th.Thread):
         return res
 
 
+def _labrat_prune_outputs(work, scratch, max_mb, keep):
+    """Chuyển file > max_mb trong thư mục làm việc sang scratch (không phải output) trừ khi khớp keep."""
+    import fnmatch as _fn
+    import shutil as _sh
+    pruned = []
+    if max_mb <= 0:
+        return pruned
+    limit = max_mb * 1024 * 1024
+    for p in sorted(work.rglob("*")):
+        try:
+            if not p.is_file() or p.is_symlink() or p.stat().st_size <= limit:
+                continue
+            rel = p.relative_to(work).as_posix()
+            if any(_fn.fnmatch(rel, k) or _fn.fnmatch(p.name, k) for k in keep):
+                continue
+            mb = round(p.stat().st_size / 1048576, 1)
+            dst = scratch / "pruned" / rel
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            _sh.move(str(p), str(dst))
+            pruned.append({"path": rel, "mb": mb})
+        except Exception as e:  # không để việc dọn làm hỏng kết quả
+            print(f"[labrat] không chuyển được {p}: {e}")
+    return pruned
+
+
 def _labrat_tail(path, n=80):
     try:
         return "\n".join(_Path(path).read_text(errors="replace").splitlines()[-n:])
@@ -145,7 +174,10 @@ def labrat_main(files, spec):
         print(f"[labrat] CẢNH BÁO: chỉ thấy {n_gpu} GPU, mong đợi {job.get('expect_gpus', 2)}")
 
     base_env = _os.environ.copy()
+    scratch = _Path(_os.environ.get("LABRAT_SCRATCH_DIR", "/tmp/labrat_scratch"))
+    scratch.mkdir(parents=True, exist_ok=True)
     base_env.update({
+        "LABRAT_SCRATCH": str(scratch),
         "LABRAT_SMOKE": "1" if smoke else "0",
         "LABRAT_DEADLINE": str(int(soft_deadline)),
         "LABRAT_OUTPUT_DIR": str(outs),
@@ -256,6 +288,8 @@ def labrat_main(files, spec):
             cv, cv_std, selected = b["metrics"]["cv"], b["metrics"].get("cv_std"), b["name"]
 
     ok = all(r.get("returncode") == 0 for r in results if not r.get("skipped")) and bool(results)
+    pruned = _labrat_prune_outputs(work, scratch, float(spec.get("output_max_mb", 200)),
+                                   list(job.get("keep_outputs") or []))
     summary = {
         "exp_id": spec.get("exp_id"),
         "smoke": smoke,
@@ -271,8 +305,12 @@ def labrat_main(files, spec):
         "selected_job": selected,
         "final": final,
         "jobs": results,
+        "outputs_pruned": pruned,
     }
     (work / "metrics.json").write_text(_json.dumps(summary, indent=2, ensure_ascii=False))
+    if pruned:
+        print(f"[labrat] đã chuyển {len(pruned)} file lớn ra khỏi output "
+              f"({sum(x['mb'] for x in pruned):.0f} MB): {[x['path'] for x in pruned][:5]}")
     print(f"[labrat] HOÀN TẤT ok={ok} cv={cv} wall={summary['wall_seconds']}s")
     print(_json.dumps({k: summary[k] for k in ("ok", "cv", "cv_std", "n_gpu", "gpu_util", "wall_seconds")}))
     # luôn thoát mã 0 để Kaggle giữ output; trạng thái thật nằm ở metrics.json["ok"]

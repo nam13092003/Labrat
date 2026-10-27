@@ -23,3 +23,4 @@ dropbox/*
 !dropbox/_mau-task.md
 .dropbox_state.json
 webpages/
+.labrat_tmp/

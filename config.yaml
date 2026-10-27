@@ -30,6 +30,17 @@ stop:
 
 poll_interval_minutes: 10
 
+outputs:                         # giữ ổ đĩa VPS không bị đầy bởi output kernel
+  kernel_max_file_mb: 200        # trong kernel: file lớn hơn bị chuyển khỏi /kaggle/working (không thành output)
+                                 #   giữ lại file cụ thể bằng job.yaml `keep_outputs: ["best_model.pt"]`
+  download_max_file_mb: 50       # trên VPS: file output tải về lớn hơn bị xoá
+  # fetch_pattern: ...           # regex file được tải về (mặc định: metrics/log/csv/ảnh/oof). job.yaml
+                                 #   `fetch_outputs: "regex"` thêm file cho một thí nghiệm
+
+disk:
+  auto_clean_free_gb: 5          # ổ còn ít hơn → cron tự chạy `labrat clean`
+  warn_free_gb: 5                # vẫn ít hơn sau khi dọn → cảnh báo Telegram (tối đa 6 giờ/lần)
+
 downloads:                       # tải dữ liệu từ link gửi qua Telegram
   max_gb: 50                     # giới hạn mỗi lần tải (còn kiểm tra dung lượng ổ trống)
 

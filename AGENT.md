@@ -24,6 +24,14 @@ Khi chưa rõ là kiểu nào, metric gì, ngân sách bao nhiêu giờ GPU → 
 - **Smoke test CPU trước, GPU sau** (CPU không tốn quota).
 - **Tuân thủ luật cuộc thi** (dữ liệu ngoài, pretrained) — ghi trong `problem_card.md`.
 - **Không đưa token / khóa API / nội dung `.env`** vào code, log, tin nhắn, hay dataset tải lên.
+- **Giữ ổ đĩa VPS gọn** (60 GB, đầy là bot chết):
+  - Trong kernel, mô hình pretrained, checkpoint trung gian, cache đặc trưng → `$LABRAT_SCRATCH`, KHÔNG để trong
+    `/kaggle/working`. Mô hình pretrained dùng nhiều lần → tải lên Kaggle một lần thành dataset riêng
+    (`labrat dataset`) rồi gắn vào kernel, thay vì tải lại mỗi phiên.
+  - Không gọi `kaggle` CLI trực tiếp để upload dataset hay tải output (luôn qua `labrat dataset` / `labrat poll`:
+    có thư mục tạm riêng và lọc file lớn). Không giải nén / tải output lớn vào `/tmp` của VPS.
+  - Đừng chép dữ liệu: dùng `labrat data-add --link` (symlink).
+  - Kiểm tra `labrat disk` trước khi làm việc nặng; `labrat clean` dọn phần an toàn.
 - **Dữ liệu người dùng là riêng tư**: dataset luôn private (bộ công cụ mặc định vậy), không đưa lên nơi công khai.
 
 ## Nhiều tài khoản Kaggle = nhiều thí nghiệm song song
@@ -194,7 +202,11 @@ dropbox/<tên>/        dữ liệu người dùng thả vào (chỉ đọc với
 ## Hợp đồng với script huấn luyện
 
 - Ghi kết quả vào `$LABRAT_METRICS_PATH` (JSON, khóa `cv`, tùy chọn `cv_std`).
-- File nặng (oof, checkpoint) vào `$LABRAT_OUTPUT_DIR`.
+- File kết quả nhỏ (oof, dự đoán, biểu đồ) vào `$LABRAT_OUTPUT_DIR`. File nặng (pretrained, checkpoint trung gian,
+  cache đặc trưng) vào `$LABRAT_SCRATCH`. Cuối phiên, runner tự chuyển mọi file > 200 MB ra khỏi output (xem
+  `outputs_pruned` trong metrics.json). Cần giữ một file lớn trên Kaggle (vd `best_model.pt` để ensemble) → khai báo
+  trong job.yaml: `keep_outputs: ["outputs/best_model.pt"]`.
+- VPS chỉ tải về metrics/log/csv/ảnh/oof nhỏ (≤ 50 MB/file). Cần thêm file → job.yaml `fetch_outputs: "<regex>"`.
 - `time.time() > $LABRAT_DEADLINE` → lưu checkpoint và thoát.
 - `LABRAT_SMOKE=1` → dữ liệu nhỏ, vài bước.
 - `mode: parallel`: mỗi job thấy đúng 1 GPU (`CUDA_VISIBLE_DEVICES`) → luôn dùng `cuda:0`.

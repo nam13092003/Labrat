@@ -6,7 +6,9 @@ import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import budget, kaggle_ops
+import yaml
+
+from . import budget, housekeeping, kaggle_ops
 from .bundle import build_bundle, slugify
 from .accounts import get_account, load_accounts, run_account
 from .config import TEMPLATES, comp_dir
@@ -107,6 +109,23 @@ def push(cfg: dict, exp_id: str, *, smoke: bool, force: bool = False, skip_smoke
 
 
 # ---------------------------------------------------------------- poll
+# Mặc định chỉ tải về VPS: metrics/log/văn bản/ảnh nhỏ và dự đoán OOF. Thêm bằng job.yaml `fetch_outputs`
+# (regex) hoặc config `outputs.fetch_pattern`. File > outputs.download_max_file_mb luôn bị xoá sau khi tải.
+DEFAULT_FETCH = (r"(^|/)(metrics[^/]*\.json|[^/]*\.(log|txt|md|csv|tsv|yaml|yml|png|svg|html)"
+                 r"|oof[^/]*\.(npz|npy|parquet|csv))$")
+
+
+def fetch_pattern(cfg: dict, exp: dict) -> str:
+    pats = [cfg.get("outputs", {}).get("fetch_pattern") or DEFAULT_FETCH]
+    try:
+        job = yaml.safe_load((exp_path(cfg, exp) / "job.yaml").read_text(encoding="utf-8")) or {}
+        if job.get("fetch_outputs"):
+            pats.append(str(job["fetch_outputs"]))
+    except Exception:
+        pass
+    return "|".join(f"(?:{p})" for p in pats)
+
+
 def _apply_metrics(cfg: dict, exp: dict, run: dict, m: dict) -> None:
     overhead = float(cfg.get("budget", {}).get("startup_overhead_hours", 0.05))
     run["wall_seconds"] = m.get("wall_seconds")
@@ -153,7 +172,11 @@ def poll(cfg: dict) -> list[dict]:
         if dest.exists():
             shutil.rmtree(dest)
         try:
-            kaggle_ops.kernel_output(acc, run["kernel_ref"], dest)
+            got = kaggle_ops.kernel_output(acc, run["kernel_ref"], dest, pattern=fetch_pattern(cfg, exp))
+            run["output_filtered"] = got["filtered"]
+            pr = housekeeping.prune_large(dest, housekeeping.download_max_mb(cfg))
+            if pr:
+                run["output_pruned"] = pr
         except kaggle_ops.KaggleError as e:
             run["output_error"] = str(e)[-500:]
         mfile = next(iter(dest.rglob("metrics.json")), None) if dest.exists() else None

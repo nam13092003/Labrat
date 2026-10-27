@@ -24,7 +24,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from labrat import budget, dropbox, experiments, telegram  # noqa: E402
+from labrat import budget, dropbox, experiments, housekeeping, telegram  # noqa: E402
 from labrat.cli import _notify_events  # noqa: E402
 from labrat.config import competitions_root, load_config  # noqa: E402
 
@@ -65,10 +65,29 @@ def scan_dropbox() -> None:
         enqueue("dropbox-" + it["name"], dropbox.wake_message(it))
 
 
+def check_disk(cfg: dict, state: dict) -> None:
+    """Ổ sắp đầy → tự dọn phần an toàn; vẫn thiếu → cảnh báo Telegram (tối đa 6 giờ/lần)."""
+    dcfg = cfg.get("disk", {})
+    d = housekeeping.disk()
+    if d["free_gb"] < float(dcfg.get("auto_clean_free_gb", 5)):
+        r = housekeeping.clean(cfg)
+        print(f"  disk: còn {d['free_gb']} GB → tự dọn {r['freed_gb']} GB")
+        if r["freed_gb"] >= 0.5:
+            telegram.send_message(f"🧹 Ổ đĩa còn {d['free_gb']} GB → đã tự dọn {r['freed_gb']} GB "
+                                  f"(output lớn/file tạm). Còn {r['disk']['free_gb']} GB.", cfg)
+        d = r["disk"]
+    if d["free_gb"] < float(dcfg.get("warn_free_gb", 5)) and time.time() - state.get("_disk_warn", 0) > 6 * 3600:
+        state["_disk_warn"] = time.time()
+        rows = "\n".join(f"• {x['gb']} GB {telegram.esc(x['path'])}" for x in housekeeping.big_dirs(6))
+        telegram.send_message(f"⚠️ <b>Ổ đĩa VPS sắp đầy</b>: còn {d['free_gb']} GB / {d['total_gb']} GB. "
+                              f"Bot sẽ ngừng hoạt động khi đầy.\nLớn nhất:\n{rows}", cfg)
+
+
 def main():
     base = load_config()
     state = json.loads(STATE.read_text()) if STATE.exists() else {}
     print(f"[{datetime.now():%Y-%m-%d %H:%M}] tick")
+    check_disk(base, state)
     scan_dropbox()
     for reg_path in sorted(competitions_root(base).glob("*/registry.json")):
         slug = reg_path.parent.name

@@ -23,7 +23,7 @@ from pathlib import Path
 import requests
 import yaml
 
-from . import agent, budget, dropbox, experiments, fetcher
+from . import agent, budget, dropbox, experiments, fetcher, housekeeping
 from .config import ROOT, comp_dir, competitions_root, load_config, load_env
 
 WAKE_DIR = ROOT / ".wake_queue"
@@ -38,6 +38,8 @@ HELP = """Lệnh nhanh:
 /usage — token & tỉ lệ cache hit 24h qua
 /stop <slug> — tạm dừng dự án (không đẩy thí nghiệm mới)
 /resume <slug> — tiếp tục dự án
+/disk — dung lượng ổ đĩa VPS + thư mục lớn nhất
+/clean — dọn output lớn, file tạm, file tải dở (không đụng dữ liệu)
 /dropbox — xem thư mục thả dữ liệu
 /scan — quét thư mục thả dữ liệu ngay (không chờ cron)
 /get <link> [tên] — tải dữ liệu từ link (gửi link trong tin nhắn thường cũng được)
@@ -125,6 +127,11 @@ def quick_status() -> str:
         lines.append(f"• {slug}{' [TẠM DỪNG]' if cfg.get('paused') else ''}: best "
                      f"{best['cv']:.5f} ({best['id']})" if best else f"• {slug}: chưa có kết quả")
         lines[-1] += f"\n  đang chạy: {act} · GPU {b['project_used']:.1f}/{b['project_cap']:.0f}h · {b['phase']}"
+    if not lines:
+        lines.append("Chưa có dự án nào.")
+    d = housekeeping.disk()
+    lines.append(f"💾 Ổ đĩa: còn {d['free_gb']} GB / {d['total_gb']} GB ({d['used_pct']}% đã dùng)"
+                 + (" ⚠️ sắp đầy — /clean" if d["free_gb"] < 5 else ""))
     return "\n".join(lines) or "Chưa có dự án nào."
 
 
@@ -172,6 +179,15 @@ def handle_quick(text: str) -> str | None:
     if cmd == "/new":
         agent.reset_session()
         return "🆕 Lượt tiếp theo sẽ mở phiên agent mới."
+    if cmd == "/disk":
+        d = housekeeping.disk()
+        rows = "\n".join(f"• {r['gb']} GB  {r['path']}" for r in housekeeping.big_dirs(8))
+        return f"💾 Còn {d['free_gb']} / {d['total_gb']} GB ({d['used_pct']}% đã dùng)\nLớn nhất:\n{rows}"
+    if cmd == "/clean":
+        r = housekeeping.clean()
+        top = "\n".join(f"• {i['mb']:.0f} MB  {i['path']}" for i in r["items"][:8])
+        return (f"🧹 Đã dọn {r['freed_gb']} GB ({r['n_items']} mục). Còn trống {r['disk']['free_gb']} GB."
+                + (f"\n{top}" if top else "\nKhông có gì để dọn. Xem /disk để biết thứ đang chiếm chỗ."))
     if cmd == "/dropbox":
         rows = dropbox.listing()
         body = "\n".join(f"• {r['name']}: {r['n_files']} file, {r['total_mb']} MB — {r['status']}" for r in rows)

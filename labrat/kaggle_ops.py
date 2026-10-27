@@ -7,13 +7,20 @@ KHÔNG có lệnh nộp bài — công cụ này không nộp bài.
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from .accounts import Account, env_for
+from .config import ROOT
+
+# Thư mục tạm riêng cho mọi lệnh kaggle (CLI nén dataset vào TMPDIR trước khi upload — 4 GB dữ liệu là
+# 4 GB file tạm). Xoá ngay sau lệnh; thư mục bỏ lại do tiến trình bị giết được housekeeping dọn sau.
+TMP_ROOT = ROOT / ".labrat_tmp"
 
 
 class KaggleError(RuntimeError):
@@ -29,8 +36,14 @@ def _bin() -> str:
 
 
 def run(args: list[str], acc: Account | None = None, timeout: int = 900) -> str:
-    env = env_for(acc) if acc else None
-    proc = subprocess.run([_bin(), *args], capture_output=True, text=True, timeout=timeout, env=env)
+    env = env_for(acc) if acc else os.environ.copy()
+    tmp = TMP_ROOT / f"{os.getpid()}-{time.time_ns()}"
+    tmp.mkdir(parents=True, exist_ok=True)
+    env["TMPDIR"] = env["TMP"] = env["TEMP"] = str(tmp)
+    try:
+        proc = subprocess.run([_bin(), *args], capture_output=True, text=True, timeout=timeout, env=env)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
     out = ((proc.stdout or "") + (proc.stderr or "")).strip()
     who = f"[{acc.name}/{acc.username}] " if acc else ""
     if proc.returncode != 0:
@@ -78,11 +91,23 @@ def kernel_status(acc: Account, ref: str) -> str:
     return "unknown"
 
 
-def kernel_output(acc: Account, ref: str, dest: Path) -> list[Path]:
+def kernel_output(acc: Account, ref: str, dest: Path, pattern: str | None = None) -> dict:
+    """Tải output kernel. pattern = regex tên file (chỉ tải file khớp; cần kaggle CLI có --file-pattern).
+    CLI cũ không hỗ trợ → tải hết (người gọi tự cắt file lớn sau đó)."""
     dest = Path(dest)
     dest.mkdir(parents=True, exist_ok=True)
-    run(["kernels", "output", ref, "-p", str(dest), "-o"], acc, timeout=1800)
-    return sorted(p for p in dest.rglob("*") if p.is_file())
+    args = ["kernels", "output", ref, "-p", str(dest), "-o"]
+    filtered = False
+    if pattern:
+        try:
+            run(args + ["--file-pattern", pattern], acc, timeout=1800)
+            filtered = True
+        except KaggleError as e:
+            if "unrecognized arguments" not in str(e) and "--file-pattern" not in str(e):
+                raise
+    if not filtered:
+        run(args, acc, timeout=3600)
+    return {"filtered": filtered, "files": sorted(p for p in dest.rglob("*") if p.is_file())}
 
 
 # ---------------- datasets ----------------

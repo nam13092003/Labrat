@@ -62,7 +62,7 @@ Cờ dòng lệnh của các harness thay đổi theo phiên bản. Nếu `pytho
 ## Dùng qua Telegram
 
 ```
-/help  /status  /accounts  /usage  /new  /stop <slug>  /resume <slug>  /dropbox  /scan  /get <link>  /cancel
+/help  /status  /accounts  /usage  /disk  /clean  /new  /stop <slug>  /resume <slug>  /dropbox  /scan  /get <link>  /cancel
 
 Nghiên cứu cuộc thi https://www.kaggle.com/competitions/playground-series-s6e1, ngân sách 15h GPU
 Nghiên cứu cuộc thi https://xacle.org/2027/description.html, ngân sách 15h GPU   (cuộc thi ngoài Kaggle)
@@ -169,6 +169,21 @@ sắp xếp để giữ phần đầu request ổn định:
   khác, xem trên dashboard của provider.
 
 `/new` xoá ngữ cảnh, nên lượt ngay sau đó sẽ cache miss toàn bộ. Chỉ dùng khi thật sự muốn bắt đầu lại.
+
+## Ổ đĩa
+
+Kernel có thể ghi hàng GB vào output (mô hình pretrained, checkpoint). Labrat chặn việc này ở ba lớp:
+
+1. **Trong kernel:** cuối phiên, file > 200 MB bị chuyển khỏi `/kaggle/working`, nên Kaggle không lưu thành output.
+   Muốn giữ một file thì khai báo `keep_outputs` trong `job.yaml`.
+2. **Khi tải về VPS:** chỉ tải metrics, log, csv, ảnh và OOF (`kaggle kernels output --file-pattern`), sau đó xoá
+   file > 50 MB.
+3. **Cron:** ổ còn dưới 5 GB thì tự chạy `labrat clean`. Nếu vẫn thiếu, bot cảnh báo qua Telegram.
+
+Mỗi lệnh `kaggle` chạy với thư mục tạm riêng, xoá ngay sau khi xong, nên file nén dataset hàng GB không còn bị bỏ lại
+trong `/tmp`.
+
+Lệnh hữu ích: `/disk` và `/clean` trên Telegram; `labrat disk` và `labrat clean --dry-run` trên VPS.
 
 ## Vận hành
 

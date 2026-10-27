@@ -62,6 +62,7 @@ def build_bundle(exp_dir: Path, *, cfg: dict, exp: dict, username: str, smoke: b
         "metric_direction": cfg.get("metric_direction", job.get("metric_direction", "maximize")),
         "max_runtime_hours": 1.0 if smoke else float(k.get("max_runtime_hours", 9)),
         "safety_margin_minutes": 5 if smoke else float(k.get("safety_margin_minutes", 20)),
+        "output_max_mb": float(cfg.get("outputs", {}).get("kernel_max_file_mb", 200)),
     }
     payload = base64.b64encode(json.dumps({"files": files, "spec": spec}).encode()).decode()
     runner = (TEMPLATES / "runner.py").read_text(encoding="utf-8")

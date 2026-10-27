@@ -18,6 +18,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 import zipfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -178,18 +179,36 @@ def _tests(data_dir: Path):
     def fake_status(acc, ref):
         return "complete" if ref in finished else "running"
 
-    def fake_output(acc, ref, dest):
+    seen_patterns = []
+
+    def fake_output(acc, ref, dest, pattern=None):
+        seen_patterns.append(pattern)
         dest.mkdir(parents=True, exist_ok=True)
         mm = dict(m, wall_seconds=3600 * 1.2, n_gpu=2,
                   gpu_util=[{"gpu": 0, "util_mean": 87.0, "util_max": 100, "mem_max_mb": 9200},
                             {"gpu": 1, "util_mean": 81.0, "util_max": 99, "mem_max_mb": 8800}])
         (dest / "metrics.json").write_text(json.dumps(mm))
-        return [dest / "metrics.json"]
+        # CLI cũ không lọc được → giả lập có checkpoint 60 MB lọt về
+        (dest / "outputs").mkdir(exist_ok=True)
+        with open(dest / "outputs" / "checkpoint.pth", "wb") as f:
+            f.truncate(60 * 1024 * 1024)
+        return {"filtered": False, "files": sorted(dest.rglob("*"))}
     kaggle_ops.kernel_status, kaggle_ops.kernel_output = fake_status, fake_output
     events = experiments.poll(cfg)
     done = [e for e in events if e["status"] == "complete"]
     check(len(done) == 1 and done[0]["account"] == outs[0]["account"] and done[0]["cv"],
           f"1 xong ({done[0]['account']}, cv={done[0]['cv']:.4f}), 2 đang chạy")
+    import re as _re
+    pat = _re.compile(seen_patterns[0])
+    check(all(pat.search(x) for x in ("metrics.json", "outputs/metrics_fold0.json", "logs/fold0.log",
+                                      "outputs/oof_all.npz", "outputs/sub.csv"))
+          and not any(pat.search(x) for x in ("outputs/checkpoint-30.pth", "outputs/tok_train_n7500.npz",
+                                              "outputs/m2d_clap.zip")),
+          "chỉ xin tải metrics/log/csv/oof — không tải checkpoint, cache .npz, zip")
+    e0 = experiments.registry_for(cfg).get(outs[0]["exp"])
+    big = experiments.exp_path(cfg, e0) / "out" / "gpu" / "outputs" / "checkpoint.pth"
+    check(not big.exists() and e0["runs"][-1].get("output_pruned"),
+          "file > 50 MB lọt về (CLI cũ) bị xoá ngay sau khi tải")
     o4 = experiments.push(cfg, ids[3], smoke=False, est_hours=1.5)
     check(o4["account"] == outs[0]["account"], f"tài khoản vừa rảnh ({o4['account']}) nhận thí nghiệm tiếp theo")
 
@@ -267,6 +286,59 @@ def _tests(data_dir: Path):
     meta2 = json.loads((edir / "_bundle_gpu" / "kernel-metadata.json").read_text())
     check(uploads == ["a1", "a2", "a3"] and "user3/churn-data" in meta2["dataset_sources"],
           "dataset tải lên mọi tài khoản; kernel của user3 gắn user3/churn-data")
+
+    print("7a) giữ ổ đĩa gọn")
+    from labrat import housekeeping
+    # runner trong kernel: file lớn bị chuyển khỏi output, file giữ lại theo keep_outputs
+    work = Path(tempfile.mkdtemp(prefix="labrat_work_")); scr = Path(tempfile.mkdtemp(prefix="labrat_scr_"))
+    (work / "outputs").mkdir()
+    for name, mb in (("outputs/pretrained.pth", 3), ("outputs/best_model.pt", 3), ("outputs/oof.npz", 0.1)):
+        with open(work / name, "wb") as f:
+            f.truncate(int(mb * 1024 * 1024))
+    ns = {}
+    exec(compile((ROOT / "templates" / "runner.py").read_text(), "runner", "exec"), ns)
+    pr = ns["_labrat_prune_outputs"](work, scr, 1, ["outputs/best_model.pt"])
+    check([x["path"] for x in pr] == ["outputs/pretrained.pth"] and (work / "outputs/best_model.pt").exists()
+          and (work / "outputs/oof.npz").exists() and (scr / "pruned/outputs/pretrained.pth").exists(),
+          "runner: file lớn chuyển sang scratch, giữ best_model.pt (keep_outputs) và oof nhỏ")
+    shutil.rmtree(work); shutil.rmtree(scr)
+    # mọi lệnh kaggle có TMPDIR riêng và được xoá
+    tmp_seen = {}
+    real_sub_run = kaggle_ops.subprocess.run
+
+    def spy(cmd, **kw):
+        tmp_seen["dir"] = kw["env"]["TMPDIR"]
+        Path(kw["env"]["TMPDIR"], "xacle-data.tar").write_bytes(b"x" * 1000)
+        return subprocess.CompletedProcess(cmd, 0, "ok", "")
+    kaggle_ops.subprocess.run = spy
+    kaggle_ops._bin = lambda: "kaggle"
+    try:
+        kaggle_ops.run(["datasets", "version"], accounts.load_accounts(cfg)[0])
+    finally:
+        kaggle_ops.subprocess.run = real_sub_run
+    check(tmp_seen["dir"].startswith(str(kaggle_ops.TMP_ROOT)) and not Path(tmp_seen["dir"]).exists(),
+          "lệnh kaggle dùng thư mục tạm riêng, file nén tạm bị xoá sau lệnh")
+    # clean: bundle + output lớn + tmp bị bỏ lại; không đụng data/
+    stale = kaggle_ops.TMP_ROOT / "dead-1"; stale.mkdir(parents=True, exist_ok=True)
+    (stale / "left.tar").write_bytes(b"0" * 2048)
+    old = time.time() - 5 * 3600
+    os.utime(stale / "left.tar", (old, old)); os.utime(stale, (old, old))
+    keep_data = comp_dir(cfg, SLUG) / "data" / "big.bin"; keep_data.parent.mkdir(parents=True, exist_ok=True)
+    with open(keep_data, "wb") as f:
+        f.truncate(80 * 1024 * 1024)
+    ob = experiments.exp_path(cfg, e0) / "out" / "gpu" / "outputs" / "cache.npz"
+    with open(ob, "wb") as f:
+        f.truncate(70 * 1024 * 1024)
+    dry = housekeeping.clean(cfg, dry_run=True)
+    check(ob.exists() and dry["freed_gb"] >= 0.07, f"clean --dry-run: báo {dry['freed_gb']} GB, chưa xoá gì")
+    r = housekeeping.clean(cfg)
+    check(not ob.exists() and not stale.exists() and keep_data.exists()
+          and not list(comp_dir(cfg, SLUG).glob("experiments/*/_bundle_*")),
+          f"clean: xoá output lớn, bundle, tmp bỏ lại ({r['n_items']} mục, {r['freed_gb']} GB); giữ nguyên data/")
+    keep_data.unlink()
+    st = bridge.quick_status()
+    check("💾 Ổ đĩa" in st and "GB" in bridge.handle_quick("/disk") and "🧹" in bridge.handle_quick("/clean"),
+          "/status có dung lượng ổ; /disk và /clean trên Telegram")
 
     print("7b) thư mục thả dữ liệu")
     from labrat import dropbox

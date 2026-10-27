@@ -22,6 +22,9 @@ Thực nghiệm
   labrat new-exp <slug> --name ... --hypothesis ... [--template gbdt_folds|torch_ddp] [--parent exp-003]
   labrat push <slug> <exp> [--smoke] [--account acc2] [--skip-smoke] [--force] [--est-hours 1.5]
   labrat poll <slug> | wait <slug> | tick <slug> | status <slug> | budget <slug> | stop-check <slug>
+Ổ đĩa
+  labrat disk                                        dung lượng trống + thư mục lớn nhất
+  labrat clean [--dry-run]                           dọn output lớn, bundle, file tạm, file tải dở
 Báo cáo
   labrat report <slug> [--send]
   labrat notify <slug> "<text>"
@@ -167,6 +170,16 @@ def cmd_paper_report(a):
 def cmd_data_add(a):
     cfg = load_config(a.slug)
     out(data.data_add(cfg, a.src, link=a.link))
+
+
+def cmd_clean(a):
+    from . import housekeeping
+    out(housekeeping.clean(load_config(), dry_run=a.dry_run))
+
+
+def cmd_disk(a):
+    from . import housekeeping
+    out({"disk": housekeeping.disk(), "largest": housekeeping.big_dirs(12)})
 
 
 def cmd_page(a):
@@ -341,6 +354,8 @@ def build_parser() -> argparse.ArgumentParser:
     s = add("data-add", cmd_data_add, "slug", "src")
     s.add_argument("--link", action="store_true", help="symlink thay vì sao chép (dữ liệu lớn trong dropbox)")
     s = add("get", cmd_get, "url"); s.add_argument("--name")
+    s = add("clean", cmd_clean); s.add_argument("--dry-run", action="store_true")
+    add("disk", cmd_disk)
     s = add("page", cmd_page, "url"); s.add_argument("--slug")
     s.add_argument("--follow", type=int, default=1, help="đi tiếp bao nhiêu tầng trang con cùng site")
     s.add_argument("--max-pages", type=int, default=12)
