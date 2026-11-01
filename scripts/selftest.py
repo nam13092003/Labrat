@@ -539,6 +539,9 @@ def _tests(data_dir: Path):
         if "LỖI" in json.dumps(body, ensure_ascii=False):
             return {"choices": [{"error": {"code": 502, "message": "provider down"}}]}
         u = {"prompt_tokens": 1200, "completion_tokens": 300}
+        if body.get("response_format"):
+            return {"model": body["model"], "choices": [{"message": {"content": '{"label": "pos"}'},
+                                                           "finish_reason": "stop"}], "usage": u}
         if body["model"] != "cheap/text-mini":
             u["cost"] = 0.0021
         return {"model": body["model"], "choices": [{"message": {"content": "Có overfit từ epoch 7."},
@@ -607,6 +610,71 @@ def _tests(data_dir: Path):
         check(sp["today_usd"] > 3 and "vision/flash" in sp["by_model_month"], f"spend: hôm nay ${sp['today_usd']}")
         check("OpenRouter: hôm nay $" in bridge.handle_quick("/usage"), "/usage hiện chi tiêu OpenRouter")
         check(llm.balance()["limit_remaining"] == 7.5, "balance: tín dụng còn lại của key")
+
+        print("8d) LLM làm phương pháp thực nghiệm: batch zero/few-shot, tăng cường, dịch")
+        llm.CACHE_DIR = tmpd / "llmcache"
+        vdata = tmpd / "val.jsonl"
+        vdata.write_text("".join(json.dumps({"id": f"r{i}", "text": f"câu số {i}", "label": "pos"}) + "\n"
+                                for i in range(30)))
+        shots = tmpd / "shots.jsonl"
+        shots.write_text(json.dumps({"text": "tuyệt vời", "output": '{"label": "pos"}'}) + "\n"
+                         + json.dumps({"text": "tệ quá", "output": '{"label": "neg"}'}) + "\n")
+        tpl = "Phân loại cảm xúc: {text}"
+        n0 = len(sent)
+        d = llm.batch(str(vdata), tpl, "cheap/text-mini", str(tmpd / "zs.jsonl"), dry_run=True)
+        check(d["rows_todo"] == 30 and d["estimate_upper_usd"] > 0 and "câu số 0" in d["example_prompt"]
+              and len(sent) == n0, f"--dry-run: ước tính ${d['estimate_upper_usd']} cho 30 dòng, không gọi API")
+        r = llm.batch(str(vdata), tpl, "cheap/text-mini", str(tmpd / "zs.jsonl"), examples=str(shots),
+                      system="Trả lời JSON", json_mode=True, limit=10, purpose="zero-shot thử")
+        b = sent[-1]
+        roles = [m["role"] for m in b["messages"]]
+        check(r["processed_now"] == 10 and roles == ["system", "user", "assistant", "user", "assistant", "user"]
+              and b["messages"][-1]["content"].startswith("Phân loại cảm xúc: câu số"),
+              "few-shot: ví dụ thành cặp user/assistant trước câu hỏi; chạy 10 dòng (--limit)")
+        check(b["provider"]["data_collection"] == "deny" and b["temperature"] == 0.0 and b["seed"] == 42,
+              "mặc định: nhà cung cấp không lưu dữ liệu, temperature 0, seed 42")
+        outs_ = [json.loads(l) for l in (tmpd / "zs.jsonl").read_text().splitlines()]
+        check(all(o["parsed"] == {"label": "pos"} for o in outs_) and Path(str(tmpd / "zs.jsonl") + ".meta.json").exists(),
+              "--json: kết quả được parse; lưu .meta.json để tái lập")
+        n1 = len(sent)
+        r = llm.batch(str(vdata), tpl, "cheap/text-mini", str(tmpd / "zs.jsonl"), examples=str(shots),
+                      system="Trả lời JSON", json_mode=True, limit=10)
+        check(r["rows_todo"] == 0 and len(sent) == n1, "chạy lại: dòng đã xong được bỏ qua (tiếp tục được)")
+        (tmpd / "zs.jsonl").unlink()
+        r = llm.batch(str(vdata), tpl, "cheap/text-mini", str(tmpd / "zs.jsonl"), examples=str(shots),
+                      system="Trả lời JSON", json_mode=True, limit=10)
+        check(r["from_cache"] == 10 and r["cost_usd"] == 0 and len(sent) == n1,
+              "xoá kết quả rồi chạy lại: lấy từ cache, không trả tiền lần hai")
+        r = llm.batch(str(vdata), tpl, "vision/flash", str(tmpd / "aug.jsonl"), budget_usd=0.01, purpose="tăng cường")
+        check(r["stopped"] and r["processed_now"] <= 5 and not r["complete"],
+              f"vượt ngân sách: chạy thử {r['processed_now']} dòng, dự kiến ${r['projected_total_usd']}, dừng chờ duyệt")
+        try:
+            llm.batch(str(vdata), tpl, "vision/flash", str(tmpd / "aug.jsonl"), budget_usd=5)
+            check(False, "ngân sách lớn phải cần --approved")
+        except llm.LLMError as e:
+            check("--approved" in str(e), "ngân sách > $2 mà chưa duyệt → từ chối")
+        try:
+            llm.batch(str(vdata), tpl, "vision/flash", str(tmpd / "aug.jsonl"), approved=True)
+            check(False, "--approved phải kèm --budget-usd")
+        except llm.LLMError as e:
+            check("--budget-usd" in str(e), "--approved bắt buộc kèm --budget-usd")
+        r = llm.batch(str(vdata), tpl, "vision/flash", str(tmpd / "aug.jsonl"), budget_usd=1, approved=True)
+        check(r["complete"] and r["rows_with_output"] == 30, "đã duyệt: chạy tiếp từ chỗ dừng, đủ 30 dòng")
+        try:
+            llm.batch(str(vdata), "Dịch: {noi_dung}", "cheap/text-mini", str(tmpd / "tr.jsonl"), limit=2)
+            check(False, "template sai cột phải báo")
+        except llm.LLMError as e:
+            check("noi_dung" in str(e) and "text" in str(e), "template dùng cột không có → báo rõ các cột hiện có")
+        cfgr = load_config(SLUG)
+        gpu_before = budget.summary(cfgr, experiments.registry_for(cfgr))["project_used"]
+        rec = experiments.record_result(cfgr, name="zero-shot cheap-mini", hypothesis="LLM zero-shot làm baseline",
+                                        cv=0.71, method="zero-shot", cost_usd=0.003,
+                                        artifacts=[str(tmpd / "zs.jsonl")])
+        regr = experiments.registry_for(cfgr)
+        check(any(e["id"] == rec["id"] for e in regr.completed())
+              and budget.summary(cfgr, regr)["project_used"] == gpu_before,
+              "labrat record: kết quả zero-shot vào sổ thí nghiệm, không tính vào giờ GPU")
+        check("zero-shot cheap-mini" in report.build(cfgr).read_text(), "kết quả LLM hiện trong thẻ báo cáo")
     finally:
         shutil.rmtree(tmpd, ignore_errors=True)
 

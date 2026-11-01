@@ -51,6 +51,29 @@ def new_experiment(cfg: dict, *, name: str, hypothesis: str, template: str | Non
     return rec
 
 
+def record_result(cfg: dict, *, name: str, hypothesis: str, cv: float, cv_std: float | None = None,
+                  method: str = "llm", cost_usd: float = 0.0, notes: str = "", artifacts: list[str] | None = None) -> dict:
+    """Ghi kết quả một thí nghiệm KHÔNG chạy trên kernel (vd zero/few-shot qua API) vào sổ thí nghiệm."""
+    reg = registry_for(cfg)
+    exp_id = reg.next_id()
+    folder = f"{exp_id}-{slugify(name)[:30]}"
+    d = comp_dir(cfg, cfg["slug"]) / "experiments" / folder
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "NOTES.md").write_text(f"# {exp_id} — {name}\n\n**Giả thuyết:** {hypothesis}\n\n**Phương pháp:** {method}"
+                                f" (không dùng GPU Kaggle)\n\n**Kết quả:** CV = {cv}"
+                                f"{f' ± {cv_std}' if cv_std is not None else ''} · chi phí API ${cost_usd}\n\n"
+                                f"{notes}\n\nFile: {', '.join(artifacts or [])}\n", encoding="utf-8")
+    ts = now_iso()
+    rec = reg.add({"id": exp_id, "folder": folder, "name": name, "hypothesis": hypothesis, "template": None,
+                   "parent": None, "status": "complete", "cv": float(cv), "cv_std": cv_std, "finished_at": ts,
+                   "method": method, "api_cost_usd": round(float(cost_usd), 4),
+                   "metrics": {"cv": float(cv), "cv_std": cv_std, "method": method, "artifacts": artifacts or []},
+                   "runs": [{"kind": "api", "pushed_at": ts, "finished_at": ts, "status": "complete",
+                             "cost_usd": round(float(cost_usd), 4)}]})
+    reg.save()
+    return rec
+
+
 # ---------------------------------------------------------------- push
 def push(cfg: dict, exp_id: str, *, smoke: bool, force: bool = False, skip_smoke: bool = False,
          est_hours: float | None = None, account: str | None = None) -> dict:

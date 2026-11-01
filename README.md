@@ -169,24 +169,38 @@ sắp xếp để giữ phần đầu request ổn định:
 
 `/new` xoá ngữ cảnh, nên lượt ngay sau đó sẽ cache miss toàn bộ. Chỉ dùng khi thật sự muốn bắt đầu lại.
 
-## Gọi model khác qua OpenRouter
+## Dùng LLM qua OpenRouter
 
-Nếu đặt `OPENROUTER_API_KEY` (lệnh `python3 install.py --only llm`), agent có thể gọi **bất kỳ model nào trên
-OpenRouter** khi cần: đọc ảnh/biểu đồ, PDF scan, tài liệu rất dài, hoặc xin ý kiến thứ hai từ model mạnh khi bế tắc.
+Nếu đặt `OPENROUTER_API_KEY` (lệnh `python3 install.py --only llm`), agent dùng được **bất kỳ model nào trên
+OpenRouter**, theo hai cách:
 
+**1. Như một phương pháp thực nghiệm:** chạy LLM trên từng dòng dữ liệu để thử zero-shot hoặc few-shot, tăng cường
+dữ liệu, dịch dữ liệu, gán nhãn giả…
 ```bash
-labrat llm models --modality image --max-price 1      # liệt kê model (rẻ nhất trước), lọc theo loại đầu vào / giá
-labrat llm ask "câu hỏi" --model <id> --file hinh.png --out ket_qua.md --purpose "..."
-labrat llm spend                                      # chi tiêu hôm nay / tháng này / theo model
-labrat llm balance                                    # tín dụng còn lại của key
+labrat llm batch val.jsonl --model <id> --template-file tpl.txt --examples shots.jsonl --json \
+       --out competitions/<slug>/llm/zs.jsonl --limit 20                                   # chạy thử 20 dòng
+labrat llm batch ... --dry-run                                                             # ước tính toàn bộ
+labrat record <slug> --name "zero-shot gemini-flash" --hypothesis "..." --cv 0.71 --method zero-shot --cost-usd 0.8
 ```
+- **Tiếp tục khi dừng:** dừng giữa chừng thì chạy lại cùng lệnh để làm tiếp. Có cache, nên không trả tiền hai lần cho
+  cùng một yêu cầu.
+- **Tái lập:** mặc định `temperature 0` và `seed 42`. File `<out>.meta.json` lưu model, template và tham số.
+- **Duyệt ngân sách:** batch ước tính trên **$2** (`batch_auto_usd`) sẽ chạy thử vài dòng, ngoại suy chi phí rồi dừng.
+  Agent nhắn bạn ước tính; chỉ chạy tiếp khi bạn đồng ý (`--approved --budget-usd`).
+- **Sổ thí nghiệm:** kết quả zero-shot hoặc few-shot được ghi bằng `labrat record`, nên xuất hiện trong báo cáo cạnh
+  các mô hình huấn luyện.
 
-- **Trần chi phí:** đặt trong `config.yaml → llm` (mặc định $0.5 mỗi lần gọi, $3 mỗi ngày, $30 mỗi tháng). Trước mỗi
-  lần gọi, Labrat ước tính chi phí và từ chối nếu vượt trần. Chi phí thật được ghi vào `.llm_usage.jsonl`.
-- **Nên đặt thêm "Credit limit"** cho key trên trang OpenRouter để có một lớp chặn thứ hai.
-- **Xem chi tiêu:** `/usage` trên Telegram hiện chi tiêu OpenRouter.
-- **Riêng tư:** agent được dặn không gửi khoá hay token, chỉ gửi mẫu nhỏ của dữ liệu người dùng, và không đưa key vào
-  kernel Kaggle.
+**2. Như công cụ hỗ trợ:** đọc ảnh, biểu đồ, PDF scan, tài liệu dài, hoặc xin ý kiến thứ hai từ model mạnh
+(`labrat llm ask … --file hinh.png`).
+
+**Chi phí và riêng tư:**
+- **Trần chi phí:** `config.yaml → llm`, gồm $0.5 mỗi lần `ask`, $3 mỗi ngày và $30 mỗi tháng.
+- **Credit limit:** nên đặt thêm cho key trên trang OpenRouter.
+- **Xem chi tiêu:** `labrat llm spend` hoặc `/usage`.
+- **Nhà cung cấp:** mặc định chỉ dùng nhà cung cấp **không lưu và không huấn luyện** trên dữ liệu gửi đi
+  (`data_collection: deny`).
+- **Không gọi trong kernel:** LLM chạy trên VPS, không chạy trong kernel Kaggle, và key không bao giờ được đưa vào
+  kernel.
 
 ## Ổ đĩa
 

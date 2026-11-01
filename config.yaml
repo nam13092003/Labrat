@@ -33,11 +33,14 @@ poll_interval_minutes: 10
 llm:                             # agent gọi model khác qua OpenRouter (`labrat llm`), key: OPENROUTER_API_KEY
   enabled: true
   per_call_usd: 0.5              # trần MỖI lần gọi (ước tính trước khi gọi)
-  daily_usd: 3.0                 # trần mỗi ngày (UTC)
+  daily_usd: 3.0                 # trần mỗi ngày (UTC) cho `llm ask`; batch đã duyệt dùng ngân sách riêng
   monthly_usd: 30.0              # trần mỗi tháng
   max_tokens: 4000               # output tối đa mặc định
   pdf_engine: cloudflare-ai      # model không đọc PDF trực tiếp: cloudflare-ai (miễn phí) | mistral-ocr (PDF scan, có phí)
   deny_models: []                # vd ["openai/o1-pro"] để chặn model quá đắt
+  data_collection: deny          # chỉ dùng nhà cung cấp KHÔNG lưu/huấn luyện trên dữ liệu gửi đi (allow = mọi nhà)
+  batch_auto_usd: 2.0            # batch ước tính lớn hơn → dừng sau vài dòng chạy thử, chờ người dùng duyệt
+  batch_workers: 4               # số yêu cầu song song khi chạy batch
 
 outputs:                         # giữ ổ đĩa VPS không bị đầy bởi output kernel
   kernel_max_file_mb: 200        # trong kernel: file lớn hơn bị chuyển khỏi /kaggle/working (không thành output)

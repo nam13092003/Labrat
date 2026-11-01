@@ -25,7 +25,10 @@ Thực nghiệm
 Model ngoài (OpenRouter)
   labrat llm models [--search q] [--modality image|file] [--max-price USD/1M]
   labrat llm ask "<prompt>" --model <id> [--file f]... [--out file] [--purpose "..."] [--json]
+  labrat llm batch <data> --template "..{col}.." --model <id> --out res.jsonl [--examples shots.jsonl]
+                 [--json] [--limit n] [--dry-run] [--budget-usd X --approved]
   labrat llm spend | balance
+  labrat record <slug> --name ... --hypothesis ... --cv X [--method zero-shot] [--cost-usd]
 Ổ đĩa
   labrat disk                                        dung lượng trống + thư mục lớn nhất
   labrat clean [--dry-run]                           dọn output lớn, bundle, file tạm, file tải dở
@@ -186,6 +189,16 @@ def cmd_llm(a):
             out(llm.spend())
         elif a.llm_cmd == "balance":
             out(llm.balance())
+        elif a.llm_cmd == "batch":
+            tpl = a.template
+            if a.template_file:
+                tpl = Path(a.template_file).read_text(encoding="utf-8")
+            if not tpl:
+                raise llm.LLMError("Thiếu --template hoặc --template-file.")
+            out(llm.batch(a.data, tpl, a.model, a.out, id_field=a.id_field, examples=a.examples, system=a.system,
+                          max_tokens=a.max_tokens, json_mode=a.json, temperature=a.temperature, seed=a.seed,
+                          workers=a.workers, limit=a.limit, budget_usd=a.budget_usd, approved=a.approved,
+                          dry_run=a.dry_run, purpose=a.purpose or ""))
         else:
             prompt = a.prompt or ""
             if a.prompt_file:
@@ -199,6 +212,14 @@ def cmd_llm(a):
     except llm.LLMError as e:
         out({"error": str(e)})
         sys.exit(2)
+
+
+def cmd_record(a):
+    cfg = load_config(a.slug)
+    rec = experiments.record_result(cfg, name=a.name, hypothesis=a.hypothesis, cv=a.cv, cv_std=a.cv_std,
+                                    method=a.method, cost_usd=a.cost_usd, notes=a.notes or "",
+                                    artifacts=a.artifact)
+    out({"exp": rec["id"], "cv": rec["cv"], "method": rec["method"]})
 
 
 def cmd_clean(a):
@@ -395,6 +416,20 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument("--max-tokens", type=int); q.add_argument("--json", action="store_true")
     q.add_argument("--temperature", type=float); q.add_argument("--out"); q.add_argument("--purpose")
     q.add_argument("--allow-over-cap", action="store_true", help="CHỈ khi người dùng đã đồng ý vượt trần")
+    b = lsp.add_parser("batch"); b.add_argument("data"); b.add_argument("--model", required=True)
+    b.add_argument("--out", required=True); b.add_argument("--template"); b.add_argument("--template-file")
+    b.add_argument("--id-field", default="id"); b.add_argument("--examples", help="few-shot .jsonl (cột + output)")
+    b.add_argument("--system"); b.add_argument("--max-tokens", type=int, default=512)
+    b.add_argument("--json", action="store_true"); b.add_argument("--temperature", type=float, default=0.0)
+    b.add_argument("--seed", type=int, default=42); b.add_argument("--workers", type=int)
+    b.add_argument("--limit", type=int); b.add_argument("--budget-usd", type=float)
+    b.add_argument("--approved", action="store_true", help="CHỈ khi người dùng đã duyệt ngân sách batch")
+    b.add_argument("--dry-run", action="store_true"); b.add_argument("--purpose")
+    s = add("record", cmd_record, "slug"); s.add_argument("--name", required=True)
+    s.add_argument("--hypothesis", required=True); s.add_argument("--cv", type=float, required=True)
+    s.add_argument("--cv-std", type=float); s.add_argument("--method", default="llm")
+    s.add_argument("--cost-usd", type=float, default=0.0); s.add_argument("--notes")
+    s.add_argument("--artifact", action="append", default=[])
     s = add("clean", cmd_clean); s.add_argument("--dry-run", action="store_true")
     add("disk", cmd_disk)
     s = add("page", cmd_page, "url"); s.add_argument("--slug")

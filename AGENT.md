@@ -65,45 +65,64 @@ Phần cứng T4: fp16 (không bf16), không FlashAttention-2 (dùng SDPA), ~15 
 (2 job song song → `n_jobs=2`, `num_workers=2` mỗi job). Sau mỗi lần chạy xem `gpu_util`: GPU < 40% là lãng phí;
 `n_gpu < 2` → báo người dùng.
 
-## Gọi model khác qua OpenRouter (`labrat llm`)
+## Dùng LLM qua OpenRouter (`labrat llm`)
 
-Bạn có thể gọi BẤT KỲ model nào trên OpenRouter khi điều đó giúp tác vụ tốt hơn hoặc rẻ hơn. Đây là công cụ phụ,
-không thay bạn: bạn vẫn là người quyết định, kiểm chứng câu trả lời của model khác bằng dữ liệu/thực nghiệm.
+Bạn được dùng key OpenRouter của người dùng để gọi BẤT KỲ model nào, theo hai cách:
 
-**Nên dùng khi:**
-- Cần **nhìn** ảnh/biểu đồ/hình trong paper, ảnh mẫu dữ liệu, biểu đồ loss (model của bạn không có thị giác).
-- **PDF scan** hoặc bảng/công thức mà `text.txt` trích kém → gửi PDF cho model đọc file.
-- Tài liệu **quá dài** cho context của bạn → model context dài tóm tắt theo câu hỏi cụ thể.
-- **Bế tắc**: 2 lần sửa không xong một lỗi, hoặc cần phản biện kế hoạch / thiết kế thí nghiệm → xin ý kiến
-  thứ hai từ một model mạnh (gửi đúng đoạn code + log + câu hỏi cụ thể, không gửi cả repo).
-- **Việc hàng loạt đơn giản** (gắn nhãn, chuẩn hoá văn bản) → model nhỏ, rẻ, thử trên ít mẫu trước.
+### 1. LLM là MỘT PHƯƠNG PHÁP THỰC NGHIỆM (`llm batch`)
+Khi bài toán có thể hưởng lợi, hãy cân nhắc các hướng sau như mọi giả thuyết khác trong `plan.md` (xếp theo lợi ích ÷ chi phí):
 
-**Không dùng khi** việc tự làm được nhanh, hoặc chỉ để "hỏi cho chắc" điều đã kiểm chứng được bằng code.
+| Hướng | Làm gì | Kiểm chứng |
+|---|---|---|
+| **Zero-shot / few-shot** | LLM dự đoán trực tiếp trên tập VALIDATION | tính đúng metric cuộc thi → `labrat record` để so với mô hình huấn luyện |
+| **Tăng cường dữ liệu** | paraphrase, sinh mẫu tổng hợp cho lớp hiếm | A/B: huấn luyện có vs không có dữ liệu tổng hợp (2 GPU song song) |
+| **Dịch dữ liệu** | dịch sang ngôn ngữ mô hình mạnh hơn, hoặc dịch ngược để tăng cường | so CV trước/sau |
+| **Gán nhãn giả / làm sạch nhãn** | LLM gán nhãn dữ liệu chưa nhãn, phát hiện nhãn sai | đo độ khớp với nhãn thật trên một tập con có nhãn TRƯỚC |
+| **Đặc trưng / giải thích** | LLM sinh đặc trưng văn bản, rationale để chưng cất | ablation |
 
-**Cách dùng:**
+Quy trình chuẩn:
 ```
-python -m labrat llm models --modality image --max-price 1        # tìm model: rẻ nhất đứng đầu, giá USD/1M token
-python -m labrat llm models --search "gemini flash"
-python -m labrat llm ask "Đọc biểu đồ: loss có overfit không, từ epoch nào?" --model <id> \
-       --file experiments/exp-007/out/gpu/outputs/loss.png --purpose "exp-007 kiểm tra overfit"
-python -m labrat llm ask --prompt-file q.md --file papers/<pid>/paper.pdf --model <id> \
-       --out papers/<pid>/llm_notes.md --max-tokens 6000 --purpose "đọc bảng kết quả paper"
-python -m labrat llm spend                                          # đã tiêu bao nhiêu
+# 1) chuẩn bị file dữ liệu .jsonl/.csv có cột id (ví dụ val.jsonl) + template prompt dùng {tên_cột}
+python -m labrat llm models --search "<họ model>" --max-price 1          # chọn model, xem giá
+python -m labrat llm batch val.jsonl --model <id> --template-file tpl.txt --out competitions/<slug>/llm/zs_val.jsonl \
+       --limit 20 --purpose "zero-shot thử"                              # 2) CHẠY THỬ 20 dòng, tự đọc kết quả
+python -m labrat llm batch val.jsonl --model <id> --template-file tpl.txt --out ...  --dry-run   # 3) ước tính toàn bộ
+python -m labrat llm batch val.jsonl --model <id> --template-file tpl.txt --out ... \
+       [--examples shots.jsonl] [--json] --purpose "..."                 # 4) chạy hết (tự tiếp tục nếu dừng)
+python -m labrat record <slug> --name "zero-shot <model>" --hypothesis "..." --cv <điểm> --method zero-shot \
+       --cost-usd <chi phí> --artifact competitions/<slug>/llm/zs_val.jsonl                  # 5) ghi vào sổ
 ```
-- Luôn ghi `--purpose` ngắn. Output dài → `--out <file>` rồi đọc file.
-- Chọn model **rẻ nhất đủ dùng**: việc đơn giản → model nhỏ; suy luận khó → model mạnh. Xem giá trước khi gọi.
-- Có trần chi phí (mỗi lần / ngày / tháng, xem `llm spend`). Bị chặn vì trần → chọn model rẻ hơn hoặc gửi ít dữ liệu
-  hơn; nếu thật sự cần, HỎI người dùng. Chỉ dùng `--allow-over-cap` khi người dùng đã đồng ý rõ ràng.
-- Ghi số tiền đã tiêu cho OpenRouter vào báo cáo (`report_notes.json` → insights) nếu đáng kể.
+- **Ngân sách:** batch ước tính > $2 (`batch_auto_usd`) sẽ chạy thử vài dòng, ngoại suy chi phí rồi DỪNG.
+  Khi đó nhắn người dùng: model, số dòng, chi phí dự kiến, lợi ích kỳ vọng. Chỉ chạy lại với
+  `--approved --budget-usd <số người dùng duyệt>` sau khi họ đồng ý. Không tự ý đặt `--approved`.
+- **Chống rò rỉ:** ví dụ few-shot chỉ lấy từ TRAIN, không bao giờ từ val/test. Không đưa nhãn val/test vào prompt.
+  Dữ liệu tổng hợp chỉ sinh từ train, đánh dấu cột `synthetic=1`, không đưa vào tập val.
+- **Tái lập:** mặc định `temperature 0`, `seed 42`. File `<out>.meta.json` lưu model, template, tham số; cache
+  `.cache/llm/` giúp chạy lại không tốn tiền.
+- **Đọc kết quả:** `<out>.jsonl` có `id`, `output`, `parsed` (khi `--json`), `error`, `truncated`. Dòng lỗi được thử lại
+  khi chạy lại cùng lệnh. Với gán nhãn, dùng `--json` và yêu cầu model trả về `{"label": ...}`.
+- **Đưa vào huấn luyện:** chuyển kết quả thành csv trong `data/`, rồi `labrat dataset ...` (tải lên mọi tài khoản),
+  gắn vào kernel. LLM chạy trên VPS; KHÔNG gọi API từ trong kernel Kaggle, KHÔNG đưa key vào kernel.
+- **Luật cuộc thi:** kiểm tra `problem_card.md`. Dữ liệu do LLM sinh thường bị coi là dữ liệu ngoài; một số cuộc thi cấm
+  LLM API hoặc model đóng. Nếu luật cấm hay không rõ, chỉ dùng cho nghiên cứu nội bộ và ghi rõ trong báo cáo.
 
-**An toàn & riêng tư:**
-- KHÔNG gửi nội dung `.env`, token, khoá, hay thư mục `.kaggle_accounts/`.
-- Dữ liệu người dùng là riêng tư: chỉ gửi mẫu nhỏ / thống kê tổng hợp khi thật cần, không gửi cả bộ dữ liệu.
-- Kiểm tra luật cuộc thi (`problem_card.md`): nếu cấm dùng API/model bên ngoài để tạo dự đoán hoặc dữ liệu,
-  chỉ dùng `llm` cho việc đọc/nghiên cứu, không để kết quả của nó đi vào mô hình nộp/đánh giá.
-- KHÔNG bao giờ đưa `OPENROUTER_API_KEY` vào code kernel Kaggle (kernel không giữ bí mật an toàn).
+### 2. LLM là CÔNG CỤ HỖ TRỢ (`llm ask`)
+- Xem ảnh, biểu đồ, hình trong paper (model của bạn không có thị giác); PDF scan; tài liệu quá dài.
+- Bế tắc (2 lần sửa không xong) → xin ý kiến thứ hai từ model mạnh với đúng đoạn code, log và câu hỏi cụ thể.
+```
+python -m labrat llm ask "Loss có overfit không, từ epoch nào?" --model <id> --file .../loss.png --purpose "exp-007"
+python -m labrat llm ask --prompt-file q.md --file papers/<pid>/paper.pdf --model <id> --out papers/<pid>/llm_notes.md
+```
 
+### Chung
+- Chọn **model rẻ nhất đủ dùng**; với batch, so 2–3 model trên 20 dòng trước khi chạy hết.
+- Trần chi phí: `labrat llm spend`. Bị chặn → chọn model rẻ hơn hoặc hỏi người dùng.
+- Ghi chi phí API vào `report_notes.json` (insights) và cột `--cost-usd` của `labrat record`.
+- Riêng tư: mặc định chỉ định tuyến tới nhà cung cấp **không lưu và không huấn luyện** trên dữ liệu
+  (`data_collection: deny`). Được gửi dữ liệu người dùng khi tác vụ cần (dịch, gán nhãn...), nhưng không gửi
+  `.env`, token, khoá, `.kaggle_accounts/`.
 
+## Quy trình A — Cuộc thi Kaggle
 
 ```
 python -m labrat init <slug> --metric "<metric>" --direction maximize|minimize --title "<tên>" --gpu-hours <N>

@@ -12,13 +12,25 @@ Ví dụ khi nào nên dùng (xem AGENT.md):
   labrat llm spend        chi tiêu hôm nay / tháng này / theo model
   labrat llm balance      tín dụng còn lại của key (OpenRouter)
 
+  labrat llm batch <data.jsonl|csv> --template "...{col}..." --model <id> --out res.jsonl
+                 [--examples few_shot.jsonl] [--system s] [--json] [--limit n] [--workers 4]
+                 [--budget-usd 5 --approved] [--dry-run]
+      → chạy LLM trên TỪNG DÒNG dữ liệu: zero/few-shot, tăng cường, dịch, gán nhãn giả...
+        Tiếp tục được khi dừng giữa chừng, có cache (không trả tiền 2 lần cho cùng một yêu cầu).
+
 An toàn chi phí: trần mỗi lần gọi / mỗi ngày / mỗi tháng (config.yaml → llm). Ước tính trước khi gọi,
-từ chối nếu vượt; chi phí thật (usage.cost) ghi vào .llm_usage.jsonl.
+từ chối nếu vượt; chi phí thật (usage.cost) ghi vào .llm_usage.jsonl. Batch ước tính > batch_auto_usd
+→ chạy thử vài dòng, ngoại suy chi phí, rồi dừng chờ người dùng duyệt (--approved --budget-usd).
+Riêng tư: mặc định chỉ dùng nhà cung cấp không lưu/không huấn luyện trên dữ liệu (data_collection: deny).
 """
 from __future__ import annotations
 
 import base64
+import csv
+import hashlib
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import mimetypes
 import os
 import time
@@ -55,6 +67,9 @@ def settings(cfg: dict | None = None) -> dict:
         "max_text_chars": int(c.get("max_text_chars", 400_000)),
         "pdf_engine": c.get("pdf_engine", "cloudflare-ai"),
         "deny_models": list(c.get("deny_models") or []),
+        "data_collection": c.get("data_collection", "deny"),
+        "batch_auto_usd": float(c.get("batch_auto_usd", 2.0)),
+        "batch_workers": int(c.get("batch_workers", 4)),
     }
 
 
@@ -238,6 +253,44 @@ def estimate_cost(model: dict | None, est: dict, max_tokens: int) -> float:
 
 
 # ---------------------------------------------------------------- gọi
+def _ledger_write(rec: dict) -> None:
+    LEDGER.parent.mkdir(parents=True, exist_ok=True)
+    with _LEDGER_LOCK, open(LEDGER, "a", encoding="utf-8") as f:
+        f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+
+
+_LEDGER_LOCK = threading.Lock()
+
+
+def _call(model_id: str, model: dict | None, messages: list, max_tokens: int, s: dict, json_mode: bool = False,
+          temperature: float | None = None, plugins: list | None = None, seed: int | None = None) -> dict:
+    body = {"model": model_id, "messages": messages, "max_tokens": max_tokens,
+            "provider": {"data_collection": s["data_collection"]}}
+    if plugins:
+        body["plugins"] = plugins
+    if json_mode:
+        body["response_format"] = {"type": "json_object"}
+        body["provider"]["require_parameters"] = True
+    if temperature is not None:
+        body["temperature"] = temperature
+    if seed is not None:
+        body["seed"] = seed
+    resp = _post("/chat/completions", body)
+    ch = (resp.get("choices") or [{}])[0]
+    if ch.get("error"):
+        raise LLMError(f"Model lỗi: {ch['error'].get('message', ch['error'])}")
+    content = (ch.get("message") or {}).get("content") or ""
+    if isinstance(content, list):  # một số provider trả về danh sách part
+        content = "".join(p.get("text", "") for p in content if isinstance(p, dict))
+    u = resp.get("usage") or {}
+    pt, ct = int(u.get("prompt_tokens") or 0), int(u.get("completion_tokens") or 0)
+    cost = u.get("cost")
+    if cost is None and model:
+        cost = pt * _price(model, "prompt") + ct * _price(model, "completion")
+    return {"content": content, "model": resp.get("model") or model_id, "prompt_tokens": pt,
+            "completion_tokens": ct, "cost": round(float(cost or 0), 6), "finish_reason": ch.get("finish_reason")}
+
+
 def ask(prompt: str, model_id: str, files: list[str] | None = None, system: str | None = None,
         max_tokens: int | None = None, json_mode: bool = False, temperature: float | None = None,
         out: str | None = None, purpose: str = "", allow_over_cap: bool = False) -> dict:
@@ -269,37 +322,14 @@ def ask(prompt: str, model_id: str, files: list[str] | None = None, system: str 
                        + ". Chọn model rẻ hơn / bớt dữ liệu, hoặc hỏi người dùng nâng trần (config.yaml → llm).")
 
     messages = ([{"role": "system", "content": system}] if system else []) + [{"role": "user", "content": parts}]
-    body = {"model": model_id, "messages": messages, "max_tokens": max_tokens}
-    if plugins:
-        body["plugins"] = plugins
-    if json_mode:
-        body["response_format"] = {"type": "json_object"}
-    if temperature is not None:
-        body["temperature"] = temperature
-
     t0 = time.time()
-    resp = _post("/chat/completions", body)
-    ch = (resp.get("choices") or [{}])[0]
-    if ch.get("error"):
-        raise LLMError(f"Model lỗi: {ch['error'].get('message', ch['error'])}")
-    content = (ch.get("message") or {}).get("content") or ""
-    if isinstance(content, list):  # một số provider trả về danh sách part
-        content = "".join(p.get("text", "") for p in content if isinstance(p, dict))
-    u = resp.get("usage") or {}
-    pt, ct = int(u.get("prompt_tokens") or 0), int(u.get("completion_tokens") or 0)
-    cost = u.get("cost")
-    if cost is None and model:
-        cost = pt * _price(model, "prompt") + ct * _price(model, "completion")
-    cost = round(float(cost or 0), 6)
-    used_model = resp.get("model") or model_id
-
-    LEDGER.parent.mkdir(parents=True, exist_ok=True)
-    with open(LEDGER, "a", encoding="utf-8") as f:
-        f.write(json.dumps({"ts": datetime.now(timezone.utc).isoformat(timespec="seconds"), "model": used_model,
-                            "prompt_tokens": pt, "completion_tokens": ct, "cost": cost,
-                            "estimate": round(cost_est, 6), "purpose": purpose[:200],
-                            "files": [Path(x).name for x in files or []],
-                            "seconds": round(time.time() - t0, 1)}, ensure_ascii=False) + "\n")
+    r = _call(model_id, model, messages, max_tokens, s, json_mode, temperature, plugins)
+    content, used_model, cost, pt, ct = r["content"], r["model"], r["cost"], r["prompt_tokens"], r["completion_tokens"]
+    ch = {"finish_reason": r["finish_reason"]}
+    _ledger_write({"ts": datetime.now(timezone.utc).isoformat(timespec="seconds"), "model": used_model,
+                   "prompt_tokens": pt, "completion_tokens": ct, "cost": cost, "estimate": round(cost_est, 6),
+                   "purpose": purpose[:200], "files": [Path(x).name for x in files or []],
+                   "seconds": round(time.time() - t0, 1)})
     res = {"model": used_model, "cost_usd": cost, "prompt_tokens": pt, "completion_tokens": ct,
            "finish_reason": ch.get("finish_reason"), "spend_today_usd": round(sp["today_usd"] + cost, 4)}
     if out:
@@ -312,3 +342,182 @@ def ask(prompt: str, model_id: str, files: list[str] | None = None, system: str 
     if ch.get("finish_reason") == "length":
         res["warning"] = "Bị cắt do max_tokens — tăng --max-tokens nếu cần."
     return res
+
+
+# ---------------------------------------------------------------- chạy hàng loạt trên dữ liệu
+CACHE_DIR = ROOT / ".cache" / "llm"
+
+
+class _SafeRow(dict):
+    def __missing__(self, key):
+        raise KeyError(key)
+
+
+def read_rows(path: str, id_field: str = "id") -> list[dict]:
+    p = Path(path)
+    if p.suffix.lower() in (".jsonl", ".ndjson"):
+        rows = [json.loads(l) for l in p.read_text(encoding="utf-8").splitlines() if l.strip()]
+    elif p.suffix.lower() in (".csv", ".tsv"):
+        with open(p, encoding="utf-8", newline="") as f:
+            rows = list(csv.DictReader(f, delimiter="\t" if p.suffix.lower() == ".tsv" else ","))
+    elif p.suffix.lower() == ".json":
+        rows = json.loads(p.read_text(encoding="utf-8"))
+    else:
+        raise LLMError("Dữ liệu batch phải là .jsonl / .csv / .tsv / .json")
+    for i, r in enumerate(rows):
+        r.setdefault(id_field, i)
+    return rows
+
+
+def render(template: str, row: dict) -> str:
+    try:
+        return template.format_map(_SafeRow(row))
+    except KeyError as e:
+        raise LLMError(f"Template dùng cột {e} không có trong dữ liệu. Các cột: {sorted(row)}")
+
+
+def _messages(row: dict, template: str, system: str | None, shots: list[dict]) -> list:
+    msgs = [{"role": "system", "content": system}] if system else []
+    for ex in shots:  # few-shot: cặp user/assistant trước câu hỏi thật
+        msgs.append({"role": "user", "content": ex["input"] if "input" in ex else render(template, ex)})
+        msgs.append({"role": "assistant", "content": str(ex["output"])})
+    msgs.append({"role": "user", "content": render(template, row)})
+    return msgs
+
+
+def _cache_key(model_id: str, msgs: list, max_tokens: int, json_mode: bool, temperature, seed) -> str:
+    raw = json.dumps([model_id, msgs, max_tokens, json_mode, temperature, seed], ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
+def batch(data: str, template: str, model_id: str, out: str, *, id_field: str = "id", examples: str | None = None,
+          system: str | None = None, max_tokens: int = 512, json_mode: bool = False, temperature: float | None = 0.0,
+          seed: int | None = 42, workers: int | None = None, limit: int | None = None,
+          budget_usd: float | None = None, approved: bool = False, dry_run: bool = False,
+          purpose: str = "", pilot_rows: int = 5) -> dict:
+    s = settings()
+    model = get_model(model_id)
+    if model is None:
+        raise LLMError(f"Không có model '{model_id}'. Tìm bằng: labrat llm models --search <từ khoá>")
+    cap_out = (model.get("top_provider") or {}).get("max_completion_tokens")
+    max_tokens = min(int(max_tokens), int(cap_out)) if cap_out else int(max_tokens)
+    rows = read_rows(data, id_field)
+    if limit:
+        rows = rows[: int(limit)]
+    shots = read_rows(examples, "_shot") if examples else []
+    out_p = Path(out)
+    done = {}
+    if out_p.exists():  # tiếp tục: bỏ qua dòng đã có kết quả
+        for l in out_p.read_text(encoding="utf-8").splitlines():
+            try:
+                r = json.loads(l)
+                if "output" in r and not r.get("error"):
+                    done[str(r["id"])] = r
+            except ValueError:
+                pass
+    todo = [r for r in rows if str(r[id_field]) not in done]
+
+    # ước tính (cận trên: mọi dòng dùng hết max_tokens)
+    p_in, p_out = _price(model, "prompt"), _price(model, "completion")
+    in_tok = [sum(len(m["content"]) for m in _messages(r, template, system, shots)) / 3.2 for r in todo]
+    upper = sum(in_tok) * p_in + len(todo) * (max_tokens * p_out + _price(model, "request"))
+    sp = spend()
+    plan = {"rows_total": len(rows), "rows_done": len(done), "rows_todo": len(todo), "model": model_id,
+            "estimate_upper_usd": round(upper, 4), "few_shot": len(shots), "data_collection": s["data_collection"],
+            "spend_month_usd": sp["month_usd"], "monthly_cap": s["monthly_usd"]}
+    if dry_run or not todo:
+        if todo:
+            plan["example_prompt"] = _messages(todo[0], template, system, shots)[-1]["content"][:1500]
+        return {"dry_run": dry_run, **plan, "out": str(out_p)}
+
+    budget = float(budget_usd) if budget_usd is not None else s["batch_auto_usd"]
+    if approved and budget_usd is None:
+        raise LLMError("--approved cần kèm --budget-usd (số tiền người dùng đã duyệt cho batch này).")
+    if not approved and budget > s["batch_auto_usd"]:
+        raise LLMError(f"--budget-usd {budget} > batch_auto_usd {s['batch_auto_usd']}: cần người dùng duyệt (--approved).")
+    if sp["month_usd"] + min(upper, budget) > s["monthly_usd"] and not approved:
+        raise LLMError(f"Vượt trần tháng ${s['monthly_usd']} (đã tiêu ${sp['month_usd']}). Hỏi người dùng.")
+
+    meta = {"model": model_id, "template": template, "system": system, "examples": examples, "n_shots": len(shots),
+            "max_tokens": max_tokens, "json_mode": json_mode, "temperature": temperature, "seed": seed,
+            "data": str(data), "id_field": id_field, "purpose": purpose, "data_collection": s["data_collection"],
+            "started": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+    out_p.parent.mkdir(parents=True, exist_ok=True)
+    Path(str(out_p) + ".meta.json").write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    lock, state = threading.Lock(), {"cost": 0.0, "n": 0, "errors": 0, "cached": 0, "stopped": None}
+    stop = threading.Event()
+
+    def one(row: dict) -> dict:
+        msgs = _messages(row, template, system, shots)
+        key = _cache_key(model_id, msgs, max_tokens, json_mode, temperature, seed)
+        cp = CACHE_DIR / f"{key}.json"
+        rec = {"id": row[id_field]}
+        if cp.exists():
+            r = json.loads(cp.read_text(encoding="utf-8"))
+            rec.update(output=r["content"], cost=0.0, cached=True)
+        else:
+            if stop.is_set():
+                return {}
+            try:
+                r = _call(model_id, model, msgs, max_tokens, s, json_mode, temperature, seed=seed)
+            except LLMError as e:
+                return {**rec, "error": str(e)[:300]}
+            cp.write_text(json.dumps(r, ensure_ascii=False), encoding="utf-8")
+            _ledger_write({"ts": datetime.now(timezone.utc).isoformat(timespec="seconds"), "model": r["model"],
+                           "prompt_tokens": r["prompt_tokens"], "completion_tokens": r["completion_tokens"],
+                           "cost": r["cost"], "purpose": f"batch: {purpose}"[:200]})
+            rec.update(output=r["content"], cost=r["cost"])
+            if r["finish_reason"] == "length":
+                rec["truncated"] = True
+        if json_mode:
+            try:
+                rec["parsed"] = json.loads(rec["output"])
+            except ValueError:
+                rec["parse_error"] = True
+        return rec
+
+    def run(rows_: list, fh) -> None:
+        with ThreadPoolExecutor(max_workers=workers or s["batch_workers"]) as ex:
+            futs = [ex.submit(one, r) for r in rows_]
+            for f in as_completed(futs):
+                rec = f.result()
+                if not rec:
+                    continue
+                with lock:
+                    fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+                    fh.flush()
+                    state["n"] += 1
+                    state["cost"] += rec.get("cost", 0.0)
+                    state["errors"] += 1 if rec.get("error") else 0
+                    state["cached"] += 1 if rec.get("cached") else 0
+                    if state["cost"] >= budget and not stop.is_set():
+                        stop.set()
+                        state["stopped"] = f"chạm ngân sách ${budget}"
+
+    t0 = time.time()
+    with open(out_p, "a", encoding="utf-8") as fh:
+        pilot = todo[:pilot_rows]
+        run(pilot, fh)  # chạy thử vài dòng để ước tính chi phí thật
+        avg = state["cost"] / max(1, state["n"] - state["cached"])
+        projected = state["cost"] + avg * (len(todo) - len(pilot))
+        res_extra = {"pilot_rows": len(pilot), "pilot_cost_usd": round(state["cost"], 5),
+                     "projected_total_usd": round(projected, 4)}
+        if projected > budget and not stop.is_set():
+            stop.set()
+            state["stopped"] = (f"ước tính cả batch ${projected:.3f} > ngân sách ${budget}"
+                                + ("" if approved else " — gửi ước tính cho người dùng, chạy lại với "
+                                   "--approved --budget-usd <số đã duyệt>"))
+        if not stop.is_set():
+            run(todo[len(pilot):], fh)
+    meta.update(finished=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                cost_usd_this_run=round(state["cost"], 5))
+    Path(str(out_p) + ".meta.json").write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
+    total_done = len(done) + state["n"] - state["errors"]
+    samples = []
+    for l in out_p.read_text(encoding="utf-8").splitlines()[:3]:
+        r = json.loads(l)
+        samples.append({"id": r["id"], "output": str(r.get("output", r.get("error")))[:300]})
+    return {**plan, **res_extra, "processed_now": state["n"], "errors": state["errors"], "from_cache": state["cached"],
+            "cost_usd": round(state["cost"], 5), "rows_with_output": total_done, "complete": total_done >= len(rows),
+            "stopped": state["stopped"], "seconds": round(time.time() - t0, 1), "out": str(out_p), "samples": samples}
