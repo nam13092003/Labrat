@@ -169,6 +169,25 @@ sắp xếp để giữ phần đầu request ổn định:
 
 `/new` xoá ngữ cảnh, nên lượt ngay sau đó sẽ cache miss toàn bộ. Chỉ dùng khi thật sự muốn bắt đầu lại.
 
+## Gọi model khác qua OpenRouter
+
+Nếu đặt `OPENROUTER_API_KEY` (lệnh `python3 install.py --only llm`), agent có thể gọi **bất kỳ model nào trên
+OpenRouter** khi cần: đọc ảnh/biểu đồ, PDF scan, tài liệu rất dài, hoặc xin ý kiến thứ hai từ model mạnh khi bế tắc.
+
+```bash
+labrat llm models --modality image --max-price 1      # liệt kê model (rẻ nhất trước), lọc theo loại đầu vào / giá
+labrat llm ask "câu hỏi" --model <id> --file hinh.png --out ket_qua.md --purpose "..."
+labrat llm spend                                      # chi tiêu hôm nay / tháng này / theo model
+labrat llm balance                                    # tín dụng còn lại của key
+```
+
+- **Trần chi phí:** đặt trong `config.yaml → llm` (mặc định $0.5 mỗi lần gọi, $3 mỗi ngày, $30 mỗi tháng). Trước mỗi
+  lần gọi, Labrat ước tính chi phí và từ chối nếu vượt trần. Chi phí thật được ghi vào `.llm_usage.jsonl`.
+- **Nên đặt thêm "Credit limit"** cho key trên trang OpenRouter để có một lớp chặn thứ hai.
+- **Xem chi tiêu:** `/usage` trên Telegram hiện chi tiêu OpenRouter.
+- **Riêng tư:** agent được dặn không gửi khoá hay token, chỉ gửi mẫu nhỏ của dữ liệu người dùng, và không đưa key vào
+  kernel Kaggle.
+
 ## Ổ đĩa
 
 Kernel có thể ghi hàng GB vào output (mô hình pretrained, checkpoint). Labrat chặn việc này ở ba lớp:

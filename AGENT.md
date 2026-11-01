@@ -65,7 +65,45 @@ Phần cứng T4: fp16 (không bf16), không FlashAttention-2 (dùng SDPA), ~15 
 (2 job song song → `n_jobs=2`, `num_workers=2` mỗi job). Sau mỗi lần chạy xem `gpu_util`: GPU < 40% là lãng phí;
 `n_gpu < 2` → báo người dùng.
 
-## Quy trình A — Cuộc thi Kaggle
+## Gọi model khác qua OpenRouter (`labrat llm`)
+
+Bạn có thể gọi BẤT KỲ model nào trên OpenRouter khi điều đó giúp tác vụ tốt hơn hoặc rẻ hơn. Đây là công cụ phụ,
+không thay bạn: bạn vẫn là người quyết định, kiểm chứng câu trả lời của model khác bằng dữ liệu/thực nghiệm.
+
+**Nên dùng khi:**
+- Cần **nhìn** ảnh/biểu đồ/hình trong paper, ảnh mẫu dữ liệu, biểu đồ loss (model của bạn không có thị giác).
+- **PDF scan** hoặc bảng/công thức mà `text.txt` trích kém → gửi PDF cho model đọc file.
+- Tài liệu **quá dài** cho context của bạn → model context dài tóm tắt theo câu hỏi cụ thể.
+- **Bế tắc**: 2 lần sửa không xong một lỗi, hoặc cần phản biện kế hoạch / thiết kế thí nghiệm → xin ý kiến
+  thứ hai từ một model mạnh (gửi đúng đoạn code + log + câu hỏi cụ thể, không gửi cả repo).
+- **Việc hàng loạt đơn giản** (gắn nhãn, chuẩn hoá văn bản) → model nhỏ, rẻ, thử trên ít mẫu trước.
+
+**Không dùng khi** việc tự làm được nhanh, hoặc chỉ để "hỏi cho chắc" điều đã kiểm chứng được bằng code.
+
+**Cách dùng:**
+```
+python -m labrat llm models --modality image --max-price 1        # tìm model: rẻ nhất đứng đầu, giá USD/1M token
+python -m labrat llm models --search "gemini flash"
+python -m labrat llm ask "Đọc biểu đồ: loss có overfit không, từ epoch nào?" --model <id> \
+       --file experiments/exp-007/out/gpu/outputs/loss.png --purpose "exp-007 kiểm tra overfit"
+python -m labrat llm ask --prompt-file q.md --file papers/<pid>/paper.pdf --model <id> \
+       --out papers/<pid>/llm_notes.md --max-tokens 6000 --purpose "đọc bảng kết quả paper"
+python -m labrat llm spend                                          # đã tiêu bao nhiêu
+```
+- Luôn ghi `--purpose` ngắn. Output dài → `--out <file>` rồi đọc file.
+- Chọn model **rẻ nhất đủ dùng**: việc đơn giản → model nhỏ; suy luận khó → model mạnh. Xem giá trước khi gọi.
+- Có trần chi phí (mỗi lần / ngày / tháng, xem `llm spend`). Bị chặn vì trần → chọn model rẻ hơn hoặc gửi ít dữ liệu
+  hơn; nếu thật sự cần, HỎI người dùng. Chỉ dùng `--allow-over-cap` khi người dùng đã đồng ý rõ ràng.
+- Ghi số tiền đã tiêu cho OpenRouter vào báo cáo (`report_notes.json` → insights) nếu đáng kể.
+
+**An toàn & riêng tư:**
+- KHÔNG gửi nội dung `.env`, token, khoá, hay thư mục `.kaggle_accounts/`.
+- Dữ liệu người dùng là riêng tư: chỉ gửi mẫu nhỏ / thống kê tổng hợp khi thật cần, không gửi cả bộ dữ liệu.
+- Kiểm tra luật cuộc thi (`problem_card.md`): nếu cấm dùng API/model bên ngoài để tạo dự đoán hoặc dữ liệu,
+  chỉ dùng `llm` cho việc đọc/nghiên cứu, không để kết quả của nó đi vào mô hình nộp/đánh giá.
+- KHÔNG bao giờ đưa `OPENROUTER_API_KEY` vào code kernel Kaggle (kernel không giữ bí mật an toàn).
+
+
 
 ```
 python -m labrat init <slug> --metric "<metric>" --direction maximize|minimize --title "<tên>" --gpu-hours <N>
@@ -179,7 +217,7 @@ Nếu người dùng không nói metric/mục tiêu → hỏi trước khi thự
 - Lượt có nguồn `cron` ("Sự kiện tự động") nghĩa là có thí nghiệm vừa xong hoặc có tài khoản GPU đang rảnh:
   thu kết quả, phân tích, đẩy thí nghiệm tiếp theo nếu còn ngân sách và dự án không tạm dừng (`paused`),
   rồi trả lời 1–3 dòng. Nếu không có gì cần làm, trả lời rất ngắn.
-- Bridge tự xử lý `/status`, `/accounts`, `/new`, `/stop <slug>`, `/resume <slug>`, `/dropbox`, `/scan`, `/get`, `/cancel` (và tự tải link dữ liệu). Dự án có `paused: true`
+- `/usage` hiện cả chi tiêu OpenRouter. Bridge tự xử lý `/status`, `/accounts`, `/new`, `/stop <slug>`, `/resume <slug>`, `/dropbox`, `/scan`, `/get`, `/cancel` (và tự tải link dữ liệu). Dự án có `paused: true`
   trong `project.yaml` → không đẩy thí nghiệm mới (vẫn thu kết quả kernel đang chạy).
 - Người dùng nói "ngân sách N giờ" → sửa `budget.project_gpu_hours` trong `project.yaml`.
   "thử <ý tưởng>" → đưa lên đầu hàng đợi trong `plan.md`.

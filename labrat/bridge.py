@@ -35,7 +35,7 @@ HELP = """Lệnh nhanh:
 /status — tình hình mọi dự án
 /accounts — quota & kernel từng tài khoản Kaggle
 /new — bắt đầu phiên agent mới (quên ngữ cảnh cũ; lượt sau sẽ cache miss một lần)
-/usage — token & tỉ lệ cache hit 24h qua
+/usage — token, cache hit 24h và chi tiêu OpenRouter
 /stop <slug> — tạm dừng dự án (không đẩy thí nghiệm mới)
 /resume <slug> — tiếp tục dự án
 /disk — dung lượng ổ đĩa VPS + thư mục lớn nhất
@@ -156,6 +156,26 @@ def set_paused(slug: str, paused: bool) -> str:
             if paused else f"▶️ Đã tiếp tục {slug}.")
 
 
+def _usage_text() -> str:
+    u = agent.usage_summary(24)
+    if u.get("turns_with_usage"):
+        rate = f"{100*u['cache_hit_rate']:.0f}%" if u["cache_hit_rate"] is not None else "—"
+        head = (f"Harness 24h: {u['turns']} lượt · cache hit {rate} · input {u['cache_read']:,} cache / "
+                f"{u['input_uncached']:,} không cache · output {u['output']:,}"
+                + (f" · ~${u['cost_usd']}" if u["cost_usd"] else ""))
+    else:
+        head = f"Harness 24h: {u.get('turns', 0)} lượt (harness không trả số liệu token)."
+    try:
+        from . import llm
+        sp = llm.spend()
+        top = ", ".join(f"{k.split('/')[-1]} ${v}" for k, v in list(sp["by_model_month"].items())[:4])
+        head += (f"\nOpenRouter: hôm nay ${sp['today_usd']} / trần ${sp['daily_cap']} · tháng ${sp['month_usd']}"
+                 f" / ${sp['monthly_cap']}" + (f"\n  {top}" if top else ""))
+    except Exception:
+        pass
+    return head
+
+
 def handle_quick(text: str) -> str | None:
     parts = text.strip().split()
     cmd = parts[0].split("@")[0].lower() if parts else ""
@@ -167,6 +187,8 @@ def handle_quick(text: str) -> str | None:
     if cmd == "/accounts":
         return quick_accounts()
     if cmd == "/usage":
+        return _usage_text()
+    if cmd == "/usage_harness":
         u = agent.usage_summary(24)
         if not u.get("turns_with_usage"):
             return (f"{u.get('turns', 0)} lượt agent trong 24h. Harness hiện tại không trả số liệu token "

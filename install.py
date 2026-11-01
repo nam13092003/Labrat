@@ -308,6 +308,20 @@ def configure_telegram(env: dict):
     say("  Bridge chỉ nhận lệnh từ đúng chat id này.")
 
 
+# ---------------------------------------------------------------- 3b. OpenRouter (tuỳ chọn)
+def configure_llm(env: dict):
+    head("OpenRouter (tuỳ chọn) — để agent gọi model khác khi cần")
+    say("  Agent dùng để đọc ảnh/biểu đồ, PDF scan, xin ý kiến model mạnh khi bế tắc...\n"
+        "  Tạo key tại openrouter.ai/settings/keys — NÊN đặt 'Credit limit' cho key để chặn chi phí.\n"
+        "  Trần chi tiêu phía Labrat: config.yaml → llm (mặc định $0.5/lần, $3/ngày, $30/tháng).\n"
+        "  Bỏ trống để không dùng.")
+    k = ask("OPENROUTER_API_KEY", env.get("OPENROUTER_API_KEY", ""), secret=True)
+    if k:
+        env["OPENROUTER_API_KEY"] = k
+    else:
+        env.pop("OPENROUTER_API_KEY", None)
+
+
 # ---------------------------------------------------------------- 4. dịch vụ
 def write_services():
     head("Dịch vụ nền (systemd + cron)")
@@ -377,6 +391,9 @@ def main():
         write_env(env)
     if only in (None, "telegram"):
         configure_telegram(env)
+        write_env(env)
+    if only in (None, "llm"):
+        configure_llm(env)
         write_env(env)
     if only in (None, "services"):
         write_services()

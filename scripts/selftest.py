@@ -517,6 +517,99 @@ def _tests(data_dir: Path):
           "Claude Code: bỏ git status + attribution block khỏi system prompt")
     shutil.rmtree(cap.parent)
 
+    print("8c) gọi model khác qua OpenRouter (giả lập API)")
+    from labrat import llm
+    tmpd = Path(tempfile.mkdtemp())
+    llm.LEDGER, llm.CACHE = tmpd / "usage.jsonl", tmpd / "models.json"
+    os.environ["OPENROUTER_API_KEY"] = "sk-or-fake"
+    fake_models = [
+        {"id": "cheap/text-mini", "context_length": 128000, "pricing": {"prompt": "0.0000001", "completion": "0.0000004"},
+         "architecture": {"input_modalities": ["text"]}, "top_provider": {"max_completion_tokens": 8000}},
+        {"id": "vision/flash", "context_length": 1000000, "pricing": {"prompt": "0.0000003", "completion": "0.0000025"},
+         "architecture": {"input_modalities": ["text", "image", "file"]}, "top_provider": {"max_completion_tokens": 64000}},
+        {"id": "big/expensive", "context_length": 200000, "pricing": {"prompt": "0.00006", "completion": "0.00024"},
+         "architecture": {"input_modalities": ["text", "image"]}, "top_provider": {}},
+    ]
+    sent = []
+    llm._get = lambda path, timeout=60: ({"data": fake_models} if path == "/models" else
+                                         {"data": {"limit": 10, "limit_remaining": 7.5, "usage": 2.5}})
+
+    def fake_post(path, body, timeout=600):
+        sent.append(body)
+        if "LỖI" in json.dumps(body, ensure_ascii=False):
+            return {"choices": [{"error": {"code": 502, "message": "provider down"}}]}
+        u = {"prompt_tokens": 1200, "completion_tokens": 300}
+        if body["model"] != "cheap/text-mini":
+            u["cost"] = 0.0021
+        return {"model": body["model"], "choices": [{"message": {"content": "Có overfit từ epoch 7."},
+                                                       "finish_reason": "stop"}], "usage": u}
+    llm._post = fake_post
+    try:
+        ms = llm.models(modality="image")
+        check([x["id"] for x in ms] == ["vision/flash", "big/expensive"] and ms[0]["usd_per_M_in"] == 0.3,
+              "models: lọc theo ảnh, rẻ nhất trước, giá USD/1M token")
+        check([x["id"] for x in llm.models(max_price=1)] == ["cheap/text-mini", "vision/flash"], "models: lọc theo giá")
+        img = tmpd / "loss.png"
+        img.write_bytes(b"\x89PNG\r\n\x1a\n" + b"0" * 100)
+        try:
+            llm.ask("xem ảnh", "cheap/text-mini", files=[str(img)])
+            check(False, "model chỉ đọc chữ phải từ chối ảnh")
+        except llm.LLMError as e:
+            check("không nhận ảnh" in str(e), "model không có thị giác → từ chối ảnh, gợi ý lọc --modality image")
+        r = llm.ask("Loss có overfit không?", "vision/flash", files=[str(img)], system="Bạn là chuyên gia ML",
+                    out=str(tmpd / "ans.md"), purpose="exp-007 overfit")
+        b = sent[-1]
+        parts = b["messages"][1]["content"]
+        check(b["messages"][0]["role"] == "system" and parts[0]["type"] == "text"
+              and parts[1]["image_url"]["url"].startswith("data:image/png;base64,"),
+              "gửi ảnh dạng data URL + system prompt")
+        check(r["cost_usd"] == 0.0021 and (tmpd / "ans.md").read_text().startswith("Có overfit"),
+              "ghi chi phí thật (usage.cost) và lưu câu trả lời ra --out")
+        notes = tmpd / "log.txt"
+        notes.write_text("epoch 1 loss 0.9\n" * 50)
+        r2 = llm.ask("tóm tắt log", "cheap/text-mini", files=[str(notes)])
+        check("FILE: log.txt" in sent[-1]["messages"][0]["content"][0]["text"]
+              and abs(r2["cost_usd"] - (1200 * 1e-7 + 300 * 4e-7)) < 1e-9,
+              "file văn bản được chèn vào prompt; thiếu usage.cost → tự tính theo bảng giá")
+        try:
+            from reportlab.pdfgen import canvas as _cv
+            pdf = tmpd / "paper.pdf"
+            c = _cv.Canvas(str(pdf)); c.drawString(40, 800, "Table 2: results"); c.showPage(); c.save()
+            llm.ask("đọc bảng", "big/expensive", files=[str(pdf)], max_tokens=500)
+            fb = sent[-1]
+            check(fb["messages"][0]["content"][1]["type"] == "file"
+                  and fb["messages"][0]["content"][1]["file"]["file_data"].startswith("data:application/pdf;base64,")
+                  and fb.get("plugins") == [{"id": "file-parser", "pdf": {"engine": "cloudflare-ai"}}],
+                  "PDF: gửi part 'file'; model không đọc PDF trực tiếp → dùng parser cloudflare-ai (miễn phí)")
+        except ImportError:
+            print("  - bỏ qua kiểm tra PDF (không có reportlab)")
+        try:
+            llm.ask("phân tích sâu", "big/expensive", max_tokens=8000)
+            check(False, "phải chặn khi ước tính vượt trần mỗi lần")
+        except llm.LLMError as e:
+            check("trần mỗi lần" in str(e), "chặn trước khi gọi nếu ước tính vượt trần $0.5/lần")
+        with open(llm.LEDGER, "a") as f:
+            f.write(json.dumps({"ts": datetime.now(timezone.utc).isoformat(), "model": "x", "cost": 2.999}) + "\n")
+        try:
+            llm.ask("thêm một câu", "vision/flash")
+            check(False, "phải chặn khi vượt trần ngày")
+        except llm.LLMError as e:
+            check("trần ngày" in str(e), "chặn khi tổng chi tiêu trong ngày vượt trần $3")
+        n_before = len(sent)
+        llm.ask("thêm một câu", "vision/flash", allow_over_cap=True)
+        check(len(sent) == n_before + 1, "--allow-over-cap (khi người dùng đồng ý) cho phép gọi")
+        try:
+            llm.ask("LỖI", "vision/flash", allow_over_cap=True)
+            check(False, "lỗi provider phải báo")
+        except llm.LLMError as e:
+            check("provider down" in str(e), "lỗi từ provider được báo rõ")
+        sp = llm.spend()
+        check(sp["today_usd"] > 3 and "vision/flash" in sp["by_model_month"], f"spend: hôm nay ${sp['today_usd']}")
+        check("OpenRouter: hôm nay $" in bridge.handle_quick("/usage"), "/usage hiện chi tiêu OpenRouter")
+        check(llm.balance()["limit_remaining"] == 7.5, "balance: tín dụng còn lại của key")
+    finally:
+        shutil.rmtree(tmpd, ignore_errors=True)
+
     print("9) template torch_ddp (smoke, nếu có torch)")
     try:
         import torch  # noqa: F401

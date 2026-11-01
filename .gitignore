@@ -24,3 +24,5 @@ dropbox/*
 .dropbox_state.json
 webpages/
 .labrat_tmp/
+.llm_usage.jsonl
+.cache/

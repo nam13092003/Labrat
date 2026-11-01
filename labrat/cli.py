@@ -22,6 +22,10 @@ Thực nghiệm
   labrat new-exp <slug> --name ... --hypothesis ... [--template gbdt_folds|torch_ddp] [--parent exp-003]
   labrat push <slug> <exp> [--smoke] [--account acc2] [--skip-smoke] [--force] [--est-hours 1.5]
   labrat poll <slug> | wait <slug> | tick <slug> | status <slug> | budget <slug> | stop-check <slug>
+Model ngoài (OpenRouter)
+  labrat llm models [--search q] [--modality image|file] [--max-price USD/1M]
+  labrat llm ask "<prompt>" --model <id> [--file f]... [--out file] [--purpose "..."] [--json]
+  labrat llm spend | balance
 Ổ đĩa
   labrat disk                                        dung lượng trống + thư mục lớn nhất
   labrat clean [--dry-run]                           dọn output lớn, bundle, file tạm, file tải dở
@@ -33,6 +37,7 @@ Báo cáo
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 import json
 import sys
 import time
@@ -170,6 +175,30 @@ def cmd_paper_report(a):
 def cmd_data_add(a):
     cfg = load_config(a.slug)
     out(data.data_add(cfg, a.src, link=a.link))
+
+
+def cmd_llm(a):
+    from . import llm
+    try:
+        if a.llm_cmd == "models":
+            out(llm.models(a.search, a.modality, a.max_price, a.limit, a.refresh))
+        elif a.llm_cmd == "spend":
+            out(llm.spend())
+        elif a.llm_cmd == "balance":
+            out(llm.balance())
+        else:
+            prompt = a.prompt or ""
+            if a.prompt_file:
+                prompt = (prompt + "\n\n" if prompt else "") + Path(a.prompt_file).read_text(encoding="utf-8")
+            if prompt == "-":
+                prompt = sys.stdin.read()
+            if not prompt.strip():
+                raise llm.LLMError("Thiếu prompt (đối số hoặc --prompt-file).")
+            out(llm.ask(prompt, a.model, a.file, a.system, a.max_tokens, a.json, a.temperature, a.out,
+                        a.purpose or "", a.allow_over_cap))
+    except llm.LLMError as e:
+        out({"error": str(e)})
+        sys.exit(2)
 
 
 def cmd_clean(a):
@@ -354,6 +383,18 @@ def build_parser() -> argparse.ArgumentParser:
     s = add("data-add", cmd_data_add, "slug", "src")
     s.add_argument("--link", action="store_true", help="symlink thay vì sao chép (dữ liệu lớn trong dropbox)")
     s = add("get", cmd_get, "url"); s.add_argument("--name")
+    s = add("llm", cmd_llm)
+    lsp = s.add_subparsers(dest="llm_cmd", required=True)
+    m = lsp.add_parser("models"); m.add_argument("--search"); m.add_argument("--modality",
+                                                                             choices=["image", "file", "audio", "text"])
+    m.add_argument("--max-price", type=float, help="USD / 1M token đầu vào"); m.add_argument("--limit", type=int, default=40)
+    m.add_argument("--refresh", action="store_true")
+    lsp.add_parser("spend"); lsp.add_parser("balance")
+    q = lsp.add_parser("ask"); q.add_argument("prompt", nargs="?"); q.add_argument("--model", required=True)
+    q.add_argument("--file", action="append", default=[]); q.add_argument("--system"); q.add_argument("--prompt-file")
+    q.add_argument("--max-tokens", type=int); q.add_argument("--json", action="store_true")
+    q.add_argument("--temperature", type=float); q.add_argument("--out"); q.add_argument("--purpose")
+    q.add_argument("--allow-over-cap", action="store_true", help="CHỈ khi người dùng đã đồng ý vượt trần")
     s = add("clean", cmd_clean); s.add_argument("--dry-run", action="store_true")
     add("disk", cmd_disk)
     s = add("page", cmd_page, "url"); s.add_argument("--slug")
