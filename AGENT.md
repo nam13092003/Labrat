@@ -106,12 +106,17 @@ python -m labrat record <slug> --name "zero-shot <model>" --hypothesis "..." --c
 - **Luật cuộc thi:** kiểm tra `problem_card.md`. Dữ liệu do LLM sinh thường bị coi là dữ liệu ngoài; một số cuộc thi cấm
   LLM API hoặc model đóng. Nếu luật cấm hay không rõ, chỉ dùng cho nghiên cứu nội bộ và ghi rõ trong báo cáo.
 
-### 2. LLM là CÔNG CỤ HỖ TRỢ (`llm ask`)
-- Xem ảnh, biểu đồ, hình trong paper (model của bạn không có thị giác); PDF scan; tài liệu quá dài.
-- Bế tắc (2 lần sửa không xong) → xin ý kiến thứ hai từ model mạnh với đúng đoạn code, log và câu hỏi cụ thể.
+### 2. Ảnh, PDF scan: dùng khả năng CÓ SẴN trước, `llm ask` chỉ là dự phòng
+- **Ảnh / biểu đồ** (loss.png, hình mẫu dữ liệu…): đọc trực tiếp bằng công cụ Read của bạn. Model của harness
+  (`deepseek-flash`) nhìn được ảnh. Không cần OpenRouter.
+- **PDF scan / bảng, công thức trích kém** (`labrat paper` báo `warning`): endpoint của DeepSeek không nhận file PDF,
+  nên đổi trang cần đọc thành ảnh rồi đọc bằng Read:
+  `pdftoppm -r 110 -png -f <trang> -l <trang> paper.pdf papers/<pid>/page` (gói `poppler-utils`), chỉ render các trang cần,
+  không render cả paper.
+- **`llm ask` chỉ dùng khi:** harness không có thị giác (ví dụ người dùng đổi sang `deepseek-v4-pro`: ảnh thành
+  `[Unsupported Image]`), hoặc khi người dùng yêu cầu xin ý kiến model khác. Không tự ý gọi model khác để "hỏi cho chắc".
 ```
-python -m labrat llm ask "Loss có overfit không, từ epoch nào?" --model <id> --file .../loss.png --purpose "exp-007"
-python -m labrat llm ask --prompt-file q.md --file papers/<pid>/paper.pdf --model <id> --out papers/<pid>/llm_notes.md
+python -m labrat llm ask "<câu hỏi>" --model <id> --file <ảnh|pdf> --purpose "<lý do>"
 ```
 
 ### Chung
@@ -189,8 +194,9 @@ python -m labrat page <url-trang-mô-tả> --slug <slug> --follow 1     # đọc
 python -m labrat init <slug> --kind custom --title "<tên>"   # nếu chưa có dự án phù hợp
 python -m labrat paper <slug> <arxiv-id | url | đường-dẫn-pdf>
 ```
-1. Đọc `papers/<pid>/text.txt` (đọc từng đoạn nếu dài). Nếu `warning` báo trích xuất kém, đọc `paper.pdf`
-   hoặc tìm bản HTML (arxiv.org/html/<id>), code chính thức (GitHub, Papers-with-code-style repo).
+1. Đọc `papers/<pid>/text.txt` (đọc từng đoạn nếu dài). Nếu `warning` báo trích xuất kém: tìm bản HTML
+   (arxiv.org/html/<id>) hoặc code chính thức (GitHub); bảng/hình quan trọng thì render đúng trang đó thành PNG bằng
+   `pdftoppm` rồi đọc ảnh (xem mục "Ảnh, PDF scan").
 2. Điền đầy đủ `papers/<pid>/analysis.md` theo khung có sẵn. Phần quan trọng nhất là **mục 6 (khả năng tái hiện
    trên 2×T4)** và **mục 7 (bảng đề xuất thực nghiệm)**: mỗi đề xuất có mục tiêu, thay đổi, cách dùng 2 GPU,
    ước tính giờ GPU, tiêu chí thành công. Ưu tiên: tái hiện cốt lõi thu nhỏ → ablation → áp dụng vào dữ liệu dự án.

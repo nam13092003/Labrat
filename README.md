@@ -190,8 +190,9 @@ labrat record <slug> --name "zero-shot gemini-flash" --hypothesis "..." --cv 0.7
 - **Sổ thí nghiệm:** kết quả zero-shot hoặc few-shot được ghi bằng `labrat record`, nên xuất hiện trong báo cáo cạnh
   các mô hình huấn luyện.
 
-**2. Như công cụ hỗ trợ:** đọc ảnh, biểu đồ, PDF scan, tài liệu dài, hoặc xin ý kiến thứ hai từ model mạnh
-(`labrat llm ask … --file hinh.png`).
+**2. Dự phòng cho ảnh và PDF (`labrat llm ask`):** với `deepseek-flash`, agent tự đọc ảnh, và đọc PDF scan bằng cách
+đổi trang thành ảnh, nên không cần OpenRouter. `llm ask` chỉ dùng khi harness không có thị giác (ví dụ
+`deepseek-v4-pro`), hoặc khi bạn muốn xin ý kiến một model khác.
 
 **Chi phí và riêng tư:**
 - **Trần chi phí:** `config.yaml → llm`, gồm $0.5 mỗi lần `ask`, $3 mỗi ngày và $30 mỗi tháng.
