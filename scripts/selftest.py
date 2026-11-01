@@ -548,6 +548,17 @@ def _tests(data_dir: Path):
                                                        "finish_reason": "stop"}], "usage": u}
     llm._post = fake_post
     try:
+        # key chỉ có trong .env (chưa nạp vào biến môi trường) → llm vẫn phải đọc được
+        from labrat import config as _cfgmod
+        fake_root = tmpd / "root"; fake_root.mkdir()
+        (fake_root / ".env").write_text("OPENROUTER_API_KEY=sk-or-from-dotenv\n")
+        saved_root, saved_key = _cfgmod.ROOT, os.environ.pop("OPENROUTER_API_KEY")
+        _cfgmod.ROOT = fake_root
+        try:
+            check(llm._key() == "sk-or-from-dotenv", "key chỉ nằm trong .env vẫn được đọc (llm models / balance)")
+        finally:
+            _cfgmod.ROOT = saved_root
+            os.environ["OPENROUTER_API_KEY"] = saved_key
         ms = llm.models(modality="image")
         check([x["id"] for x in ms] == ["vision/flash", "big/expensive"] and ms[0]["usd_per_M_in"] == 0.3,
               "models: lọc theo ảnh, rẻ nhất trước, giá USD/1M token")

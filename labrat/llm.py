@@ -39,7 +39,7 @@ from pathlib import Path
 
 import requests
 
-from .config import ROOT, load_config
+from .config import ROOT, load_config, load_env
 
 API = "https://openrouter.ai/api/v1"
 LEDGER = ROOT / ".llm_usage.jsonl"
@@ -74,6 +74,7 @@ def settings(cfg: dict | None = None) -> dict:
 
 
 def _key() -> str:
+    load_env()  # lệnh `llm models` / `llm balance` có thể chạy trước mọi load_config()
     k = os.environ.get("OPENROUTER_API_KEY", "").strip()
     if not k:
         raise LLMError("Chưa có OPENROUTER_API_KEY trong .env (chạy: python3 install.py --only llm).")
