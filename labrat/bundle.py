@@ -49,7 +49,8 @@ def collect_files(src: Path) -> dict[str, str]:
     return files
 
 
-def build_bundle(exp_dir: Path, *, cfg: dict, exp: dict, username: str, smoke: bool) -> tuple[Path, str]:
+def build_bundle(exp_dir: Path, *, cfg: dict, exp: dict, username: str, smoke: bool, quick: bool = False,
+                 seed: int | None = None) -> tuple[Path, str]:
     exp_dir = Path(exp_dir)
     job = yaml.safe_load((exp_dir / "job.yaml").read_text(encoding="utf-8")) or {}
     files = collect_files(exp_dir / "src")
@@ -58,9 +59,12 @@ def build_bundle(exp_dir: Path, *, cfg: dict, exp: dict, username: str, smoke: b
     spec = {
         "exp_id": exp["id"],
         "smoke": smoke,
+        "quick": bool(quick and not smoke),
+        "seed": int(seed if seed is not None else (cfg.get("research", {}) or {}).get("base_seed", 42)),
         "job": job,
         "metric_direction": cfg.get("metric_direction", job.get("metric_direction", "maximize")),
-        "max_runtime_hours": 1.0 if smoke else float(k.get("max_runtime_hours", 9)),
+        "max_runtime_hours": 1.0 if smoke else (float(k.get("quick_max_hours", 1.5)) if quick
+                                                 else float(k.get("max_runtime_hours", 9))),
         "safety_margin_minutes": 5 if smoke else float(k.get("safety_margin_minutes", 20)),
         "output_max_mb": float(cfg.get("outputs", {}).get("kernel_max_file_mb", 200)),
     }

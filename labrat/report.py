@@ -175,7 +175,12 @@ def build(cfg: dict) -> Path:
                     f'<div class="muted">{E(e.get("hypothesis",""))}</div>'
                     + (f'<div class="muted">Căn cứ: {E(e["evidence"])}</div>' if e.get("evidence") else "")
                     + '</td>'
-                    f'<td class="n">{_fmt(e.get("cv"))}</td><td class="n">{_fmt(e.get("cv_std"), 4)}</td>'
+                    f'<td class="n">{_fmt(e.get("cv"))}'
+                    + (f'<div class="muted">{e["report"]["n"]} seed: {_fmt(e["report"]["mean"])} ± '
+                       f'{_fmt(e["report"]["std"], 4)}</div>' if e.get("report") else "")
+                    + (f'<div class="muted">bản rẻ: {_fmt(e["quick_cv"])}</div>' if e.get("quick_cv") is not None
+                       else "") + '</td>'
+                    f'<td class="n">{_fmt(e.get("cv_std"), 4)}</td>'
                     f'<td class="n">{gh:.2f}h</td><td class="n">{E(acc)}</td><td><span class="st {E(e.get("status",""))}">'
                     f'{E(e.get("status",""))}</span></td></tr>')
 

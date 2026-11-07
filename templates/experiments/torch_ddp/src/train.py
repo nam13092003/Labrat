@@ -24,7 +24,7 @@ ap.add_argument("--lr", type=float, default=3e-4)
 ap.add_argument("--weight-decay", type=float, default=0.01)
 ap.add_argument("--grad-accum", type=int, default=1)
 ap.add_argument("--max-steps", type=int, default=0, help=">0: dừng sớm (smoke test)")
-ap.add_argument("--seed", type=int, default=42)
+ap.add_argument("--seed", type=int, default=int(os.environ.get("LABRAT_SEED", 42)))
 ap.add_argument("--num-workers", type=int, default=2)
 args = ap.parse_args()
 

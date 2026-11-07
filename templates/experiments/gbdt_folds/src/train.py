@@ -13,7 +13,8 @@ from common import CONFIG, OUT, SMOKE, fold_indices, load_train, score, write_me
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--fold", type=int, required=True)
-ap.add_argument("--seed", type=int, default=CONFIG["seed"])
+# seed khởi tạo mô hình: LABRAT_SEED (chỉ đổi khi `labrat report-seeds`); cách chia fold dùng CONFIG["seed"] cố định
+ap.add_argument("--seed", type=int, default=int(os.environ.get("LABRAT_SEED", CONFIG["seed"])))
 args = ap.parse_args()
 
 t0 = time.time()

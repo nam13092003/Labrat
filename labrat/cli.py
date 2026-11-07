@@ -21,6 +21,8 @@ Dữ liệu
 Thực nghiệm
   labrat new-exp <slug> --name ... --hypothesis ... --evidence ... [--template gbdt_folds|torch_ddp] [--parent exp-003]
   labrat push <slug> <exp> [--smoke] [--account acc2] [--skip-smoke] [--force] [--est-hours 1.5]
+  labrat push <slug> <exp> --quick            bản rẻ trên GPU để sàng lọc ý tưởng
+  labrat report-seeds <slug> <exp> [--n 3]    CHỐT kết quả: chạy lại cấu hình đã chốt với n seed (báo cáo mean ± std)
   labrat poll <slug> | wait <slug> | tick <slug> | status <slug> | budget <slug> | stop-check <slug>
 Model ngoài (OpenRouter)
   labrat llm models [--search q] [--modality image|file] [--max-price USD/1M]
@@ -278,8 +280,13 @@ def cmd_new_exp(a):
 
 def cmd_push(a):
     cfg = load_config(a.slug)
-    out(experiments.push(cfg, a.exp, smoke=a.smoke, force=a.force, skip_smoke=a.skip_smoke,
+    out(experiments.push(cfg, a.exp, smoke=a.smoke, quick=a.quick, force=a.force, skip_smoke=a.skip_smoke,
                          est_hours=a.est_hours, account=a.account))
+
+
+def cmd_report_seeds(a):
+    cfg = load_config(a.slug)
+    out(experiments.report_seeds(cfg, a.exp, a.n, est_hours=a.est_hours, force=a.force))
 
 
 def _notify_events(cfg, events):
@@ -287,13 +294,23 @@ def _notify_events(cfg, events):
         if ev["status"] in ("queued", "running", "unknown"):
             continue
         e = experiments.registry_for(cfg).get(ev["exp"])
-        icon = {"complete": "✅", "smoke_ok": "🧪", "error": "❌", "smoke_failed": "❌"}.get(ev["status"], "ℹ️")
+        if ev["status"] == "report_done":
+            rep = ev.get("report") or {}
+            if rep:
+                telegram.send_message(
+                    f"📊 <b>{telegram.esc(cfg['slug'])} · {telegram.esc(ev['exp'])}</b> "
+                    f"{telegram.esc(e.get('name',''))}: {rep['n']} seed → "
+                    f"<b>{rep['mean']:.5f} ± {rep['std']:.5f}</b> (min {rep['min']:.5f}, max {rep['max']:.5f})", cfg)
+            continue
+        if ev.get("fidelity") == "report":
+            continue  # báo một lần khi đủ seed
+        icon = {"complete": "✅", "smoke_ok": "🧪", "quick_ok": "🔎", "error": "❌", "smoke_failed": "❌"}.get(ev["status"], "ℹ️")
         util = ", ".join(f"GPU{g['gpu']} {g['util_mean']:.0f}%" for g in (ev.get("gpu_util") or []))
         msg = (f"{icon} <b>{telegram.esc(cfg['slug'])} · {telegram.esc(ev['exp'])}</b> "
                f"{telegram.esc(e.get('name',''))}: {telegram.esc(ev['status'])} "
                f"[{telegram.esc(ev.get('account',''))}]")
         if ev.get("cv") is not None:
-            msg += f"\nCV = <b>{ev['cv']:.5f}</b>"
+            msg += f"\n{'CV bản rẻ' if ev.get('fidelity') == 'quick' else 'CV'} = <b>{ev['cv']:.5f}</b>"
         if ev.get("gpu_hours"):
             msg += f" · {ev['gpu_hours']:.2f}h GPU"
         if util:
@@ -348,7 +365,9 @@ def cmd_status(a):
     cfg = load_config(a.slug)
     reg = experiments.registry_for(cfg)
     out([{"id": e["id"], "name": e.get("name"), "status": e.get("status"), "cv": e.get("cv"),
-          "cv_std": e.get("cv_std"), "parent": e.get("parent"),
+          "cv_std": e.get("cv_std"), "quick_cv": e.get("quick_cv"),
+          "report": {k: e["report"][k] for k in ("n", "mean", "std")} if e.get("report") else None,
+          "parent": e.get("parent"),
           "account": (e.get("runs") or [{}])[-1].get("account")} for e in reg.experiments])
 
 
@@ -450,6 +469,10 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--smoke", action="store_true"); s.add_argument("--skip-smoke", action="store_true")
     s.add_argument("--force", action="store_true"); s.add_argument("--est-hours", type=float)
     s.add_argument("--account")
+    s.add_argument("--quick", action="store_true", help="bản rẻ trên GPU (quick_args/quick_max_jobs) để sàng lọc")
+    s = add("report-seeds", cmd_report_seeds, "slug", "exp")
+    s.add_argument("--n", type=int, help="số seed gồm seed gốc (mặc định research.report_seeds)")
+    s.add_argument("--est-hours", type=float); s.add_argument("--force", action="store_true")
     s = add("poll", cmd_poll, "slug"); s.add_argument("--quiet", action="store_true")
     s = add("wait", cmd_wait, "slug"); s.add_argument("--max-minutes", type=int, default=600)
     s.add_argument("--any", action="store_true", help="trả về ngay khi MỘT thí nghiệm xong")

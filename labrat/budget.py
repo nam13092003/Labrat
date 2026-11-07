@@ -15,7 +15,7 @@ from datetime import datetime, timedelta, timezone
 
 from .accounts import load_accounts, run_account
 from .config import competitions_root
-from .registry import Registry, better, parse_iso
+from .registry import ACTIVE, Registry, better, parse_iso
 
 
 def kaggle_week_start(now: datetime | None = None) -> datetime:
@@ -69,7 +69,7 @@ def accounts_status(cfg: dict) -> list[dict]:
         t = parse_iso(r.get("pushed_at"))
         if t and t >= week_start:
             rows[name]["week_used"] += run_gpu_hours(r, overhead, now)
-        if not r.get("finished_at") and e.get("status") in ("running", "smoke_running"):
+        if not r.get("finished_at") and e.get("status") in ACTIVE:
             if r.get("kind") == "gpu":
                 rows[name]["gpu_busy"] = f"{slug}/{e['id']}"
             else:

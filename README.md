@@ -151,6 +151,22 @@ nghiệm đồng thời, tức 6 GPU T4.
 `labrat/budget.py` cộng giờ GPU theo từng tài khoản (quota reset 00:00 UTC thứ Bảy). Trần dự án được tính tổng trên mọi
 tài khoản, và kernel đang chạy được giữ chỗ theo thời gian ước tính.
 
+## Phương pháp nghiên cứu
+
+Labrat hướng tới kết quả viết được paper: cạnh tranh với lời giải mạnh nhất, phương pháp có cơ sở, con số đáng tin.
+
+- **Xuất phát từ lời giải mạnh nhất.** Từ thí nghiệm thứ 2, dự án phải có `prior_work.md` (đội top các kỳ trước, SOTA:
+  phương pháp, điểm, cơ chế, điều còn bỏ ngỏ). Thí nghiệm nền tái hiện lời giải mạnh nhất.
+- **Mỗi thí nghiệm có căn cứ.** `new-exp --evidence "<quan sát + số liệu>"` từ dữ liệu, phân tích lỗi hoặc paper.
+- **Không cày điểm.** Dò seed, chạy nhiều seed lúc khám phá, bỏ phiếu / blend / stack / ensemble bị chặn ở
+  `new-exp`, `record`, `push` (`research.enforce` trong `config.yaml`).
+- **Ba mức chạy.** `push --smoke` (CPU, kiểm tra code) → `push --quick` (GPU bản rẻ: ít fold / ít epoch, ≤ 1.5h, để
+  sàng lọc nhiều ý tưởng) → `push` (đầy đủ).
+- **Chốt kết quả.** `labrat report-seeds <slug> <exp> --n 3`: chạy lại cấu hình đã chốt với nhiều seed (mỗi seed một
+  tài khoản), báo cáo mean ± std của TẤT CẢ seed. Không chọn seed, không đổi `cv`; bị chặn nếu code đã đổi sau lần
+  chạy chính; tối đa 6 thí nghiệm (phương pháp cuối, nền mạnh nhất, ablation chính). Seed chỉ đổi khởi tạo mô hình
+  (`LABRAT_SEED`), cách chia fold luôn cố định.
+
 ## Chi phí LLM và cache
 
 DeepSeek tự động cache **tiền tố** của request, khớp từ đầu. Cache hit được tính giá rẻ hơn nhiều, nên hệ thống được

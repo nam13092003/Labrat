@@ -10,6 +10,7 @@ kaggle:
   accelerator: "NvidiaTeslaT4"
   enable_internet: true          # không nộp bài nên bật để pip install / tải pretrained
   max_runtime_hours: 9           # trần an toàn cho 1 phiên GPU (Kaggle: 9–12h tùy nguồn)
+  quick_max_hours: 1.5           # trần của `labrat push --quick` (bản rẻ trên GPU để sàng lọc ý tưởng)
   safety_margin_minutes: 20      # runner báo deadline sớm hơn để kịp lưu checkpoint
   title_prefix: "labrat"            # tiền tố tên kernel trên Kaggle
 
@@ -26,6 +27,11 @@ budget:
 research:                        # chính sách nghiên cứu (labrat/policy.py)
   enforce: true                  # chặn dò/chọn/trung bình seed và bỏ phiếu/ensemble nhiều mô hình
   require_evidence: true         # từ thí nghiệm thứ 2, `new-exp` phải có --evidence (quan sát làm căn cứ)
+  require_prior_work: true       # từ thí nghiệm thứ 2 phải có prior_work.md (lời giải mạnh nhất đã công bố)
+  base_seed: 42                  # seed của mọi lần chạy thường
+  report_seeds: 3                # `labrat report-seeds`: số seed khi CHỐT kết quả (gồm seed gốc)
+  max_report_seeds: 5
+  max_report_experiments: 6      # chỉ cho phương pháp cuối, baseline mạnh nhất, ablation chính
   # forbid: {nhãn: regex}        # ghi đè danh sách mẫu bị chặn (mặc định trong policy.py)
 
 stop:

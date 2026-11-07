@@ -154,6 +154,16 @@ def _tests(data_dir: Path):
         or "Kernel version 1 successfully pushed")
     reg = experiments.registry_for(cfg)
     ids = [exp["id"]]
+    try:
+        experiments.new_experiment(cfg, name="variant-x", hypothesis="biến thể", template="gbdt_folds",
+                                   evidence="phân tích lỗi baseline: lát cắt X sai nhiều hơn 20%")
+        check(False, "thiếu prior_work.md phải bị chặn")
+    except SystemExit as e:
+        check("prior_work.md" in str(e), "thí nghiệm thứ 2 khi chưa có prior_work.md → bị chặn")
+    (comp_dir(cfg, SLUG) / "prior_work.md").write_text(
+        "# Lời giải mạnh nhất đã công bố\n\n## Đội top kỳ trước\n- Phương pháp: GBDT với đặc trưng tương tác, CV 0.91 "
+        "trên tập dev chính thức.\n- Cơ chế: tương tác giữa các cột phân loại hiếm.\n- Còn bỏ ngỏ: lệch train/test "
+        "ở cột thời gian.\n- Nguồn: technical report kỳ trước.\n", encoding="utf-8")
     for i in range(3):
         ids.append(experiments.new_experiment(cfg, name=f"variant-{i}", hypothesis=f"biến thể {i}",
                                               template="gbdt_folds",
@@ -290,11 +300,83 @@ def _tests(data_dir: Path):
         "summary": "Phân loại nhị phân tabular. Baseline XGBoost 5-fold, sau đó 3 biến thể chạy song song trên "
                    "3 tài khoản Kaggle (6 GPU T4).",
         "insights": ["Biến thể 2 tốt nhất (+0.006 CV).", "Cả 2 GPU mỗi phiên đạt ~85% sử dụng."],
-        "next_directions": [{"title": "Stacking XGBoost + CatBoost", "why": "Sai số khác nhau ở nhóm cat hiếm.",
+        "next_directions": [{"title": "Mã hoá mục tiêu cho cột phân loại hiếm", "why": "Sai số tập trung ở nhóm cat hiếm.",
                              "cost": "~3h GPU", "expected_gain": "+0.002"}]}, ensure_ascii=False))
     path = report.build(cfg)
     html = path.read_text()
     check("<svg" in html and "Tài khoản Kaggle" in html and "a3" in html, f"báo cáo: {path.relative_to(ROOT)}")
+
+    print("5b) bản rẻ (--quick) + chốt kết quả nhiều seed (report-seeds)")
+    import base64 as _b64, re as _re2
+    cfg2 = dict(cfg, budget=dict(cfg.get("budget", {}), project_gpu_hours=1000), stop={"patience": 0})
+
+    def spec_of(folder):
+        txt = (Path(folder) / "main.py").read_text()
+        return json.loads(_b64.b64decode(_re2.search(r"b64decode\('([^']+)'\)", txt).group(1)))["spec"]
+
+    def fake_output2(acc, ref, dest, pattern=None):
+        dest.mkdir(parents=True, exist_ok=True)
+        bump = {"quick": -0.01, "seed43": 0.002, "seed44": -0.001}.get(dest.name, 0.0)
+        (dest / "metrics.json").write_text(json.dumps(dict(m, cv=m["cv"] + bump, wall_seconds=1800, n_gpu=2)))
+        return {"filtered": True, "files": []}
+    kaggle_ops.kernel_output = fake_output2
+    kaggle_ops.kernel_status = lambda acc, ref: "complete"
+    qd, _ = build_bundle(experiments.exp_path(cfg, experiments.registry_for(cfg).get(ids[2])), cfg=cfg,
+                         exp=experiments.registry_for(cfg).get(ids[2]), username="user1", smoke=False, quick=True)
+    sp = spec_of(qd)
+    check(sp["quick"] and sp["max_runtime_hours"] == 1.5 and sp["seed"] == 42, "bundle --quick: trần 1.5h, seed 42")
+    sp_job = yaml.safe_load((experiments.exp_path(cfg, experiments.registry_for(cfg).get(ids[2])) / "job.yaml").read_text())
+    mq = run_bundle_locally(qd, data_dir)
+    check(mq["ok"] and mq["quick"] and len([j for j in mq["jobs"] if not j.get("post")]) == sp_job["quick_max_jobs"],
+          f"runner --quick: chỉ chạy {sp_job['quick_max_jobs']} fold, cv={mq['cv']:.4f}")
+    cv_before = experiments.registry_for(cfg).get(ids[2])["cv"]
+    oq = experiments.push(cfg2, ids[2], smoke=False, quick=True)
+    check(oq["kind"] == "gpu/quick" and oq["est_hours"] <= 1.5, f"push --quick (ước tính {oq['est_hours']}h)")
+    experiments.poll(cfg2)
+    eq = experiments.registry_for(cfg).get(ids[2])
+    check(eq["status"] == "quick_ok" and abs(eq["quick_cv"] - (m["cv"] - 0.01)) < 1e-9 and eq["cv"] == cv_before,
+          "kết quả bản rẻ vào quick_cv, không đè cv đầy đủ; output ở out/quick")
+    check((experiments.exp_path(cfg, eq) / "out" / "quick" / "metrics.json").exists(), "output bản rẻ tách riêng")
+
+    tgt = ids[1]
+    et = experiments.registry_for(cfg).get(tgt)
+    cv_t = et["cv"]
+    trainf = experiments.exp_path(cfg, et) / "src" / "train.py"
+    orig_train = trainf.read_text()
+    trainf.write_text(orig_train + "\n# đổi cấu hình\n")
+    try:
+        experiments.report_seeds(cfg2, tgt, 3)
+        check(False, "code đổi sau lần chạy chính → phải chặn report-seeds")
+    except SystemExit as e:
+        check("đã đổi" in str(e), "report-seeds chặn khi code đã đổi sau lần chạy chính (không còn là cấu hình chốt)")
+    trainf.write_text(orig_train)
+    for bad_n in (1, 9):
+        try:
+            experiments.report_seeds(cfg2, tgt, bad_n)
+            check(False, "n ngoài khoảng phải bị chặn")
+        except SystemExit:
+            pass
+    check(True, "số seed ngoài 2..5 bị chặn")
+    n_push = len(pushed)
+    rs = experiments.report_seeds(cfg2, tgt, 3)
+    check(sorted(x["seed"] for x in rs["pushed"]) == [43, 44] and len({x["account"] for x in rs["pushed"]}) == 2,
+          f"report-seeds: seed gốc 42 dùng lại lần chạy chính, đẩy seed 43/44 lên 2 tài khoản {[x['account'] for x in rs['pushed']]}")
+    check(len(pushed) == n_push + 2 and experiments.registry_for(cfg).get(tgt)["status"] == "reporting",
+          "trạng thái reporting trong lúc chạy")
+    busy = [a["name"] for a in budget.accounts_status(cfg2) if a["gpu_busy"]]
+    check(len(busy) == 2, f"tài khoản chạy seed được tính là bận GPU: {busy}")
+    sd, _ = build_bundle(experiments.exp_path(cfg, et), cfg=cfg, exp=et, username="user1", smoke=False, seed=43)
+    check(spec_of(sd)["seed"] == 43, "bundle truyền seed → runner xuất LABRAT_SEED")
+    evs = experiments.poll(cfg2)
+    er = experiments.registry_for(cfg).get(tgt)
+    rep = er.get("report") or {}
+    check(er["status"] == "complete" and rep.get("n") == 3 and rep["seeds"] == [42, 43, 44] and er["cv"] == cv_t,
+          f"đủ seed → complete; báo cáo {rep.get('mean', 0):.4f} ± {rep.get('std', 0):.4f}, cv chính giữ nguyên")
+    check(any(ev["status"] == "report_done" for ev in evs), "sự kiện report_done (báo Telegram một lần)")
+    check((experiments.exp_path(cfg, er) / "out" / "seed43" / "metrics.json").exists(), "output mỗi seed tách riêng")
+    rs2 = experiments.report_seeds(cfg2, tgt, 3)
+    check(not rs2["pushed"], "gọi lại khi đã đủ seed → không đẩy thêm")
+    check("seed:" in report.build(cfg).read_text(), "thẻ báo cáo hiện mean ± std nhiều seed")
 
     print("6) nghiên cứu paper (PDF cục bộ)")
     try:

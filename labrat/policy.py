@@ -60,6 +60,20 @@ def check_evidence(cfg: dict, evidence: str | None, n_existing: int) -> None:
                          + GUIDANCE)
 
 
+def check_prior_work(cfg: dict, project_dir, n_existing: int) -> None:
+    """Từ thí nghiệm thứ 2: phải có prior_work.md — lời giải mạnh nhất đã công bố (top các kỳ trước, SOTA)."""
+    s = settings(cfg)
+    if not s["enforce"] or not (cfg.get("research", {}) or {}).get("require_prior_work", True) or n_existing == 0:
+        return
+    from pathlib import Path
+    f = Path(project_dir) / "prior_work.md"
+    if not f.exists() or len(f.read_text(encoding="utf-8").strip()) < 200:
+        raise SystemExit(f"Thiếu {f.name} (hoặc quá sơ sài). Trước khi thử ý tưởng riêng, ghi các lời giải mạnh "
+                         "nhất đã công bố cho bài này hoặc bài tương tự (đội top các kỳ trước, paper SOTA): "
+                         "phương pháp, điểm đã báo cáo, CƠ CHẾ khiến nó hiệu quả, nguồn. Thí nghiệm nền nên tái hiện "
+                         "lời giải mạnh nhất; đóng góp của bạn là cải thiện có cơ sở trên nền đó.")
+
+
 _SEED_ARG = re.compile(r"(--?seed[\s=]+\S+|\bseed\s*=\s*\S+)", re.IGNORECASE)
 _MULTI_SEED = re.compile(r"--?(n[-_]?seeds|num[-_]?seeds|seeds)\b", re.IGNORECASE)
 

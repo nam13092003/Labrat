@@ -14,6 +14,10 @@
 #   LABRAT_OUTPUT_DIR    thư mục output dùng chung (oof, checkpoint, ...)
 #   LABRAT_DEADLINE      epoch giây — quá mốc này phải lưu checkpoint và thoát
 #   LABRAT_SMOKE         "1" khi chạy thử trên CPU với dữ liệu nhỏ
+#   LABRAT_QUICK         "1" khi chạy bản rẻ trên GPU (sàng lọc ý tưởng): ít epoch / ít dữ liệu
+#                        — job.yaml `quick_args`, `quick_max_jobs`
+#   LABRAT_SEED          seed khởi tạo mô hình (mặc định 42; khác chỉ khi `labrat report-seeds`).
+#                        KHÔNG dùng cho cách chia fold — fold phải cố định giữa mọi lần chạy.
 #   LABRAT_N_GPUS, LABRAT_JOB_NAME, LABRAT_GPU_SLOT
 #   LABRAT_SCRATCH    thư mục tạm KHÔNG được lưu làm output (mô hình pretrained, cache đặc trưng...)
 #
@@ -161,6 +165,7 @@ def labrat_main(files, spec):
 
     job = spec["job"]
     smoke = bool(spec.get("smoke"))
+    quick = bool(spec.get("quick")) and not smoke
     direction = spec.get("metric_direction", job.get("metric_direction", "maximize"))
     gpus = [] if smoke else _labrat_gpus()
     n_gpu = len(gpus)
@@ -169,7 +174,7 @@ def labrat_main(files, spec):
     soft_deadline = t0 + max_h * 3600 - margin          # script nên tự dừng trước mốc này
     hard_deadline = t0 + max_h * 3600 - margin / 3      # runner sẽ SIGTERM sau mốc này
 
-    print(f"[labrat] exp={spec.get('exp_id')} smoke={smoke} gpus={n_gpu} {[g['name'] for g in gpus]}")
+    print(f"[labrat] exp={spec.get('exp_id')} smoke={smoke} quick={quick} seed={spec.get('seed', 42)} gpus={n_gpu} {[g['name'] for g in gpus]}")
     if not smoke and n_gpu < int(job.get("expect_gpus", 2)):
         print(f"[labrat] CẢNH BÁO: chỉ thấy {n_gpu} GPU, mong đợi {job.get('expect_gpus', 2)}")
 
@@ -179,6 +184,8 @@ def labrat_main(files, spec):
     base_env.update({
         "LABRAT_SCRATCH": str(scratch),
         "LABRAT_SMOKE": "1" if smoke else "0",
+        "LABRAT_QUICK": "1" if quick else "0",
+        "LABRAT_SEED": str(int(spec.get("seed", 42))),
         "LABRAT_DEADLINE": str(int(soft_deadline)),
         "LABRAT_OUTPUT_DIR": str(outs),
         "LABRAT_N_GPUS": str(n_gpu),
@@ -201,6 +208,8 @@ def labrat_main(files, spec):
         script, args = job["script"], job.get("args", "")
         if smoke and job.get("smoke_args") is not None:
             args = job["smoke_args"]
+        elif quick and job.get("quick_args") is not None:
+            args = job["quick_args"]
         if n_gpu >= 2:
             launcher = f"torchrun --standalone --nproc_per_node={n_gpu}"
         else:
@@ -216,6 +225,12 @@ def labrat_main(files, spec):
             for j in jobs:
                 if j.get("smoke_args") is not None:
                     j["args"] = j["smoke_args"]
+        elif quick:
+            if job.get("quick_max_jobs"):
+                jobs = jobs[: int(job["quick_max_jobs"])]
+            for j in jobs:
+                if j.get("quick_args") is not None:
+                    j["args"] = j["quick_args"]
         slots = n_gpu if n_gpu else int(job.get("cpu_slots", 1))
         q = _queue.Queue()
         for j in jobs:
@@ -293,6 +308,8 @@ def labrat_main(files, spec):
     summary = {
         "exp_id": spec.get("exp_id"),
         "smoke": smoke,
+        "quick": quick,
+        "seed": int(spec.get("seed", 42)),
         "ok": ok,
         "mode": mode,
         "n_gpu": n_gpu,

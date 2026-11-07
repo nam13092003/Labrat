@@ -15,6 +15,8 @@ jobs:
   - {name: fold3, script: train.py, args: "--fold 3"}
   - {name: fold4, script: train.py, args: "--fold 4"}
 smoke_max_jobs: 1      # smoke test trên CPU chỉ chạy fold đầu với dữ liệu nhỏ
+quick_max_jobs: 2      # `labrat push --quick`: bản rẻ trên GPU chỉ chạy 2 fold đầu (mỗi GPU một fold)
+                       # (thêm `quick_args: "..."` cho từng job nếu muốn ít vòng lặp hơn)
 
 post: {script: aggregate.py, args: ""}
 

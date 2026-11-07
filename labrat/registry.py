@@ -7,7 +7,8 @@ Mỗi thí nghiệm:
           status, wall_seconds, gpu_hours, n_gpu, gpu_util}]
 
 Trạng thái thí nghiệm:
-  draft → smoke_running → smoke_ok | smoke_failed → running → complete | error
+  draft → smoke_running → smoke_ok | smoke_failed → [running (quick) → quick_ok] → running → complete | error
+  complete → reporting (đang chạy các seed báo cáo, `labrat report-seeds`) → complete (+ exp["report"])
 """
 from __future__ import annotations
 
@@ -15,7 +16,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-ACTIVE = {"smoke_running", "running"}
+ACTIVE = {"smoke_running", "running", "reporting"}
 
 
 def now_iso() -> str:
@@ -73,7 +74,7 @@ class Registry:
         return [e for e in self.experiments if e.get("status") in ACTIVE]
 
     def completed(self) -> list[dict]:
-        done = [e for e in self.experiments if e.get("status") == "complete" and e.get("cv") is not None]
+        done = [e for e in self.experiments if e.get("status") in ("complete", "reporting") and e.get("cv") is not None]
         return sorted(done, key=lambda e: e.get("finished_at") or e.get("created_at"))
 
     def best(self, direction: str = "maximize") -> dict | None:

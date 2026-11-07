@@ -41,9 +41,15 @@ Khi chưa rõ là kiểu nào, metric gì, ngân sách bao nhiêu giờ GPU → 
 Người dùng thuê bạn để **nghiên cứu**: cải thiện phải đến từ hiểu biết về dữ liệu, về mô hình và về cách đặt bài toán,
 và báo cáo phải giải thích được VÌ SAO một cách làm tốt hơn. Điểm tăng mà không giải thích được = không có giá trị.
 
+Đích cuối là một paper cho cuộc thi: kết quả phải **cạnh tranh được với các lời giải mạnh nhất** VÀ phương pháp phải
+có cơ sở. Vì vậy: xuất phát từ lời giải mạnh nhất đã công bố (không từ con số không), sàng lọc ý tưởng bằng bản rẻ
+để thử được nhiều, và chốt kết quả bằng nhiều seed để con số đáng tin.
+
 **CẤM (code chặn ngay ở `new-exp`, `record`, `push`):**
 - Dò / chọn seed tốt nhất, chạy nhiều seed rồi lấy trung bình (seed averaging, seed bagging, "best seed").
-  Seed cố định (42). Độ dao động đánh giá bằng `cv_std` giữa các fold, không phải bằng chạy lại nhiều seed.
+  Khi khám phá, seed cố định (42); độ dao động xem bằng `cv_std` giữa các fold. NGOẠI LỆ duy nhất:
+  `labrat report-seeds` ở giai đoạn chốt (xem dưới) — chạy lại cấu hình ĐÃ CHỐT với vài seed và báo cáo TẤT CẢ,
+  không chọn seed nào, không đổi `cv` của thí nghiệm.
 - Chạy nhiều mô hình rồi bỏ phiếu / trung bình / blend / stack / ensemble để tăng điểm.
 - Quét siêu tham số mù (grid/random search lớn) không có giả thuyết. Chỉnh một siêu tham số được, nếu có lý do
   từ quan sát (vd learning curve cho thấy overfit sớm → tăng regularization).
@@ -76,6 +82,22 @@ và báo cáo phải giải thích được VÌ SAO một cách làm tốt hơn.
 - *Ablation*: khi một hướng tốt lên, bỏ từng thành phần để biết phần nào thực sự đóng góp.
 
 Dùng 2 GPU cho **2 giả thuyết khác nhau** (A/B) hoặc các fold — không bao giờ cho 2 seed.
+
+**Ba mức chạy:**
+| Mức | Lệnh | Dùng khi | So sánh với |
+|---|---|---|---|
+| smoke (CPU) | `push --smoke` | kiểm tra code chạy được | — |
+| bản rẻ (GPU) | `push --quick` | sàng lọc ý tưởng mới: ít fold (`quick_max_jobs`) / ít epoch (`quick_args`), ≤ `quick_max_hours` | `quick_cv` của thí nghiệm cha (chạy cha bằng `--quick` một lần nếu chưa có) |
+| đầy đủ (GPU) | `push` | ý tưởng có tín hiệu ở bản rẻ, hoặc thay đổi nhỏ đã chắc | `cv` của cha |
+
+Bản rẻ phải giữ đúng thứ hạng giữa các ý tưởng (cùng fold, cùng dữ liệu con); nếu một ý tưởng tốt ở bản rẻ mà kém ở
+bản đầy đủ, ghi lại — đó là thông tin về bài toán (vd ý tưởng chỉ có ích khi huấn luyện ngắn).
+
+**Chốt kết quả (`labrat report-seeds <slug> <exp> [--n 3]`):** chỉ cho thí nghiệm đã chạy đầy đủ, code chưa đổi
+sau lần chạy đó (code chặn nếu đổi), tối đa `research.max_report_experiments` thí nghiệm: phương pháp cuối, lời giải
+nền mạnh nhất đã tái hiện, và các ablation chính. Mỗi seed một kernel trên tài khoản rảnh; gọi lại để đẩy nốt seed
+còn chờ. Kết quả `report` = mean ± std trên mọi seed, đưa vào bảng so sánh. So sánh phương pháp với nền theo
+mean ± std, không theo một lần chạy.
 
 ## Nhiều tài khoản Kaggle = nhiều thí nghiệm song song
 
@@ -182,6 +204,10 @@ python -m labrat fetch <slug>                  # file dữ liệu + kiểm tra m
 
 Nghiên cứu: `labrat research <slug> "<truy vấn>"` (3–6 truy vấn khác góc) + web search lời giải top cuộc thi tương tự,
 ghi bằng `labrat lit-add ... --relevance 1-5 --notes "<ý chính>"` — ghi **cơ chế** khiến cách làm đó hiệu quả.
+Viết `competitions/<slug>/prior_work.md` (code bắt buộc trước thí nghiệm thứ 2): các lời giải mạnh nhất đã công bố —
+technical report của đội top các kỳ trước của chính cuộc thi này, bài tương tự, paper SOTA trên dữ liệu giống —
+mỗi cái: phương pháp, điểm đã báo cáo (và trên tập nào), cơ chế khiến nó hiệu quả, điều gì CÒN BỎ NGỎ, nguồn.
+Thí nghiệm nền mạnh = tái hiện lời giải mạnh nhất áp dụng được; đóng góp của bạn là phần cải thiện có cơ sở trên nó.
 Viết `competitions/<slug>/eda.md` (xem "Triết lý nghiên cứu", bước 1) TRƯỚC khi lập kế hoạch.
 Lập `competitions/<slug>/plan.md`: hàng đợi giả thuyết, mỗi cái đủ căn cứ → cơ chế → dự đoán → kiểm tra → chi phí,
 xếp theo *lợi ích kỳ vọng ÷ giờ GPU*, đánh dấu cái nào chạy song song được, ít nhất một ý tưởng sáng tạo.
@@ -194,17 +220,20 @@ python -m labrat new-exp <slug> --name "..." --hypothesis "..." --evidence "<qua
 #   sửa src/ và job.yaml
 python -m labrat push <slug> <exp> --smoke             # CPU
 python -m labrat wait <slug> --any                     # smoke lỗi → sửa, smoke lại
-python -m labrat push <slug> <exp> --est-hours <h>     # GPU, tự chọn tài khoản rảnh
+python -m labrat push <slug> <exp> --quick             # GPU bản rẻ: sàng lọc ý tưởng (so với quick_cv của cha)
+python -m labrat push <slug> <exp> --est-hours <h>     # GPU đầy đủ, tự chọn tài khoản rảnh
 #   lặp new-exp/smoke/push cho tới khi hết tài khoản rảnh hoặc hết giả thuyết độc lập
 python -m labrat wait <slug> --any
+python -m labrat report-seeds <slug> <exp> --n 3       # giai đoạn final: chốt kết quả nhiều seed
 ```
-Sau mỗi thí nghiệm GPU: đọc `registry.json` + log `experiments/<exp>/out/gpu/`, **phân tích lỗi trên OOF** (lát cắt,
+Sau mỗi thí nghiệm GPU: đọc `registry.json` + log `experiments/<exp>/out/{gpu,quick,seed<N>}/`, **phân tích lỗi trên OOF** (lát cắt,
 mẫu sai nặng nhất, so với thí nghiệm cha), viết Kết quả & Phân tích vào `NOTES.md` (dự đoán đúng hay sai, vì sao),
 cập nhật `plan.md`, rồi chọn tiếp theo theo giai đoạn ngân sách (`labrat budget`):
-- `explore` (20% đầu): baseline + EDA + các hướng có căn cứ khác nhau về cơ chế; ưu tiên A/B song song.
-- `exploit` (60%): đào sâu 1–2 cơ chế hiệu quả nhất, kế thừa `--parent`, ablation để biết phần nào đóng góp.
-- `final` (20%): hợp nhất các ý tưởng đã kiểm chứng vào MỘT mô hình, ablation cuối, chạy dài cấu hình tốt nhất.
-  KHÔNG ensemble / bỏ phiếu / seed averaging.
+- `explore` (20% đầu): tái hiện lời giải nền mạnh nhất + EDA + nhiều hướng có căn cứ khác nhau về cơ chế, phần
+  lớn bằng `--quick`; ưu tiên A/B song song.
+- `exploit` (60%): chạy đầy đủ các hướng có tín hiệu, đào sâu 1–2 cơ chế hiệu quả nhất (`--parent`), ablation.
+- `final` (20%): hợp nhất các ý tưởng đã kiểm chứng vào MỘT mô hình, chạy đầy đủ, rồi `report-seeds` cho phương
+  pháp cuối + nền mạnh nhất + ablation chính. KHÔNG ensemble / bỏ phiếu.
 
 Mỗi thí nghiệm thay MỘT yếu tố chính. Cải thiện là thật khi > `min_delta` và đáng kể so với `cv_std`.
 Lỗi: đọc `last_errors`, tự sửa; 2 lần lỗi cùng nguyên nhân → hỏi người dùng.
@@ -237,6 +266,9 @@ python -m labrat page <url-trang-mô-tả> --slug <slug> --follow 1     # đọc
 
 ## Quy trình B — Nghiên cứu một paper
 
+`prior_work.md` (bắt buộc trước thí nghiệm thứ 2 ở mọi quy trình): ở đây là chính paper đang nghiên cứu, các
+phương pháp nó so sánh và các công trình mạnh hơn ra sau nó.
+
 ```
 python -m labrat init <slug> --kind custom --title "<tên>"   # nếu chưa có dự án phù hợp
 python -m labrat paper <slug> <arxiv-id | url | đường-dẫn-pdf>
@@ -253,6 +285,8 @@ python -m labrat paper <slug> <arxiv-id | url | đường-dẫn-pdf>
 5. Nếu chạy: mỗi đề xuất thành một thí nghiệm (`new-exp`, giả thuyết ghi rõ "P1: ..."), theo Quy trình A.
 
 ## Quy trình C — Dữ liệu người dùng gửi
+
+`prior_work.md`: các cách tiếp cận mạnh nhất đã công bố cho loại bài toán / dữ liệu này.
 
 Dữ liệu đến theo ba đường:
 - **Thư mục thả dữ liệu (dropbox)** — đường chính cho dữ liệu lớn. Người dùng chép vào `dropbox/<tên>/`
@@ -318,5 +352,7 @@ dropbox/<tên>/        dữ liệu người dùng thả vào (chỉ đọc với
   trong job.yaml: `keep_outputs: ["outputs/best_model.pt"]`.
 - VPS chỉ tải về metrics/log/csv/ảnh/oof nhỏ (≤ 50 MB/file). Cần thêm file → job.yaml `fetch_outputs: "<regex>"`.
 - `time.time() > $LABRAT_DEADLINE` → lưu checkpoint và thoát.
-- `LABRAT_SMOKE=1` → dữ liệu nhỏ, vài bước.
+- `LABRAT_SMOKE=1` → dữ liệu nhỏ, vài bước. `LABRAT_QUICK=1` → bản rẻ (nếu không dùng `quick_args`).
+- Seed khởi tạo mô hình / thứ tự dữ liệu đọc từ `LABRAT_SEED` (mặc định 42). Cách chia fold KHÔNG theo seed này —
+  fold cố định giữa mọi thí nghiệm để so sánh cặp được.
 - `mode: parallel`: mỗi job thấy đúng 1 GPU (`CUDA_VISIBLE_DEVICES`) → luôn dùng `cuda:0`.
