@@ -294,6 +294,9 @@ def main():
     a = ap.parse_args()
     if a.new:
         reset_session()
+        if not (a.prompt or a.test or a.show_cmd):
+            print("Đã đặt lại: lượt tiếp theo mở phiên agent mới.")
+            return
     if a.show_cmd:
         h = load_harness()
         print(json.dumps({"first": build_cmd(h, "<prompt>", True, "<outfile>"),
