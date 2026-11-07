@@ -22,6 +22,8 @@ Khi chưa rõ là kiểu nào, metric gì, ngân sách bao nhiêu giờ GPU → 
 - **Đánh giá bằng CV cục bộ.** Leaderboard công khai chỉ để tham khảo.
 - **Ngân sách GPU là trần cứng.** `labrat push` tự chặn khi vượt; đừng dùng `--force` trừ khi người dùng bảo.
 - **Smoke test CPU trước, GPU sau** (CPU không tốn quota).
+- **Không dò seed, không bỏ phiếu / ensemble.** Mọi thí nghiệm phải có căn cứ từ dữ liệu, phân tích lỗi hoặc paper
+  (xem "Triết lý nghiên cứu"). Chỉ tắt `research.enforce` khi người dùng yêu cầu rõ.
 - **Tuân thủ luật cuộc thi** (dữ liệu ngoài, pretrained) — ghi trong `problem_card.md`.
 - **Không đưa token / khóa API / nội dung `.env`** vào code, log, tin nhắn, hay dataset tải lên.
 - **Giữ ổ đĩa VPS gọn** (60 GB, đầy là bot chết):
@@ -33,6 +35,46 @@ Khi chưa rõ là kiểu nào, metric gì, ngân sách bao nhiêu giờ GPU → 
   - Đừng chép dữ liệu: dùng `labrat data-add --link` (symlink).
   - Kiểm tra `labrat disk` trước khi làm việc nặng; `labrat clean` dọn phần an toàn.
 - **Dữ liệu người dùng là riêng tư**: dataset luôn private (bộ công cụ mặc định vậy), không đưa lên nơi công khai.
+
+## Triết lý nghiên cứu — hiểu bài toán, không cày điểm
+
+Người dùng thuê bạn để **nghiên cứu**: cải thiện phải đến từ hiểu biết về dữ liệu, về mô hình và về cách đặt bài toán,
+và báo cáo phải giải thích được VÌ SAO một cách làm tốt hơn. Điểm tăng mà không giải thích được = không có giá trị.
+
+**CẤM (code chặn ngay ở `new-exp`, `record`, `push`):**
+- Dò / chọn seed tốt nhất, chạy nhiều seed rồi lấy trung bình (seed averaging, seed bagging, "best seed").
+  Seed cố định (42). Độ dao động đánh giá bằng `cv_std` giữa các fold, không phải bằng chạy lại nhiều seed.
+- Chạy nhiều mô hình rồi bỏ phiếu / trung bình / blend / stack / ensemble để tăng điểm.
+- Quét siêu tham số mù (grid/random search lớn) không có giả thuyết. Chỉnh một siêu tham số được, nếu có lý do
+  từ quan sát (vd learning curve cho thấy overfit sớm → tăng regularization).
+
+**Vòng nghiên cứu:**
+1. **Hiểu dữ liệu trước khi mô hình** (`competitions/<slug>/eda.md`, viết bằng script CPU trên VPS hoặc kernel CPU):
+   phân phối nhãn và đặc trưng, giá trị thiếu, nhiễu/mâu thuẫn nhãn (mẫu trùng khác nhãn, độ đồng thuận người gán),
+   cấu trúc nhóm/thời gian/người dùng (→ chọn validation), lệch train/test (adversarial validation: AUC > 0.6 là có
+   lệch — tìm đặc trưng gây lệch), rò rỉ (leakage), độ dài / độ khó / miền con, mất cân bằng.
+2. **Phân tích lỗi sau MỖI thí nghiệm** (lưu OOF để làm được): lỗi theo lát cắt (độ dài, lớp, miền, nguồn, độ khó),
+   các mẫu sai nặng nhất và điểm chung của chúng, sai số hệ thống (lệch về giữa, bão hoà, nhầm cặp lớp), so sánh OOF
+   giữa thí nghiệm mới và cha (cải thiện ở đâu, tệ đi ở đâu). Ghi vào NOTES.md phần "Phân tích & bài học".
+3. **Mỗi giả thuyết có đủ 5 phần** (ghi trong `plan.md` và NOTES.md):
+   *căn cứ* (quan sát cụ thể, có số liệu, từ bước 1–2 hoặc paper) → *cơ chế* (vì sao thay đổi này tác động đúng chỗ
+   đó) → *dự đoán* (nếu đúng thì lát cắt nào cải thiện, CV đổi khoảng bao nhiêu) → *kiểm tra* (thí nghiệm, đổi MỘT
+   yếu tố) → *chi phí* (giờ GPU). Căn cứ truyền vào `labrat new-exp --evidence "..."` (bắt buộc từ thí nghiệm thứ 2).
+4. **Kết luận cả khi thất bại**: dự đoán sai thì cơ chế nào bị bác bỏ, rút ra điều gì về dữ liệu. Ghi vào insights.
+
+**Nguồn ý tưởng nên ưu tiên** (mỗi chu kỳ lập kế hoạch có ít nhất MỘT ý tưởng sáng tạo, không phải công thức sẵn):
+- *Đặt lại bài toán*: loss khớp metric (metric xếp hạng như SRCC → loss xếp hạng/pairwise, hoặc dự đoán hạng; QWK →
+  hồi quy + ngưỡng tối ưu; F1 → tối ưu ngưỡng theo lớp), biến đổi nhãn (log, rank, phân phối nhãn thay cho điểm
+  trung bình khi nhiều người gán), multi-task với nhãn phụ có sẵn, chia bài toán thành các bước.
+- *Thiên kiến quy nạp của mô hình*: chọn kiến trúc khớp cấu trúc dữ liệu (tuần tự, tập hợp, đồ thị, đa phương thức,
+  thứ bậc), cách trộn modality (late/early/cross-attention), pooling, độ phân giải đầu vào, pretrained phù hợp miền.
+- *Dữ liệu*: augmentation dựa trên **bất biến thật** của bài toán (không đổi nhãn), xử lý nhiễu nhãn
+  (loss bền vững, label smoothing, lọc theo đồng thuận), sửa lệch phân phối (trọng số mẫu, chuẩn hoá theo nhóm),
+  đặc trưng miền từ hiểu biết chuyên môn, curriculum theo độ khó, pseudo-label có kiểm soát.
+- *Từ paper / lời giải top*: lấy **cơ chế** rồi giải thích vì sao áp vào được dữ liệu này, không chép nguyên công thức.
+- *Ablation*: khi một hướng tốt lên, bỏ từng thành phần để biết phần nào thực sự đóng góp.
+
+Dùng 2 GPU cho **2 giả thuyết khác nhau** (A/B) hoặc các fold — không bao giờ cho 2 seed.
 
 ## Nhiều tài khoản Kaggle = nhiều thí nghiệm song song
 
@@ -58,7 +100,7 @@ Quota tính theo **thời gian phiên**, không theo số GPU. Một phiên T4 x
 |---|---|---|
 | GBDT / mô hình nhỏ, K-fold | 2 fold chạy đồng thời | `mode: parallel`, mỗi fold một job |
 | A/B hai biến thể | 2 biến thể song song trong 1 phiên | `mode: parallel`, 2 job, không `post` |
-| Seed averaging | mỗi GPU một nhóm seed | `mode: parallel` |
+| Ablation | bản đầy đủ và bản bỏ một thành phần | `mode: parallel`, 2 job |
 | Mạng sâu lớn, 1 mô hình | DDP trên cả 2 GPU | `mode: ddp` |
 
 Phần cứng T4: fp16 (không bf16), không FlashAttention-2 (dùng SDPA), ~15 GB/GPU, ~4 nhân CPU cho cả phiên
@@ -138,14 +180,16 @@ python -m labrat fetch <slug>                  # file dữ liệu + kiểm tra m
 điền `competitions/<slug>/problem_card.md`, **chốt chiến lược validation**.
 
 Nghiên cứu: `labrat research <slug> "<truy vấn>"` (3–6 truy vấn khác góc) + web search lời giải top cuộc thi tương tự,
-ghi bằng `labrat lit-add ... --relevance 1-5 --notes "<ý chính>"`. Lập `competitions/<slug>/plan.md`: hàng đợi giả thuyết
-xếp theo *lợi ích kỳ vọng ÷ giờ GPU*, đánh dấu cái nào chạy song song được.
+ghi bằng `labrat lit-add ... --relevance 1-5 --notes "<ý chính>"` — ghi **cơ chế** khiến cách làm đó hiệu quả.
+Viết `competitions/<slug>/eda.md` (xem "Triết lý nghiên cứu", bước 1) TRƯỚC khi lập kế hoạch.
+Lập `competitions/<slug>/plan.md`: hàng đợi giả thuyết, mỗi cái đủ căn cứ → cơ chế → dự đoán → kiểm tra → chi phí,
+xếp theo *lợi ích kỳ vọng ÷ giờ GPU*, đánh dấu cái nào chạy song song được, ít nhất một ý tưởng sáng tạo.
 Trả lời người dùng bằng tóm tắt kế hoạch (5–8 dòng) trước khi tiêu GPU.
 
 Vòng thực nghiệm:
 ```
 python -m labrat stop-check <slug>                    # stop=true → kết thúc; pause_until_reset → báo & chờ
-python -m labrat new-exp <slug> --name "..." --hypothesis "..." [--template gbdt_folds|torch_ddp | --parent exp-00X]
+python -m labrat new-exp <slug> --name "..." --hypothesis "..." --evidence "<quan sát + số liệu>" [--template gbdt_folds|torch_ddp | --parent exp-00X]
 #   sửa src/ và job.yaml
 python -m labrat push <slug> <exp> --smoke             # CPU
 python -m labrat wait <slug> --any                     # smoke lỗi → sửa, smoke lại
@@ -153,18 +197,20 @@ python -m labrat push <slug> <exp> --est-hours <h>     # GPU, tự chọn tài k
 #   lặp new-exp/smoke/push cho tới khi hết tài khoản rảnh hoặc hết giả thuyết độc lập
 python -m labrat wait <slug> --any
 ```
-Sau mỗi thí nghiệm GPU: đọc `registry.json` + log `experiments/<exp>/out/gpu/`, viết Kết quả & Phân tích vào
-`NOTES.md`, rồi chọn tiếp theo theo giai đoạn ngân sách (`labrat budget`):
-- `explore` (20% đầu): baseline + thử rộng, rẻ; ưu tiên A/B song song.
-- `exploit` (60%): đào sâu 1–2 hướng tốt nhất, kế thừa `--parent`.
-- `final` (20%): ensemble OOF, seed averaging, chạy dài cấu hình tốt nhất.
+Sau mỗi thí nghiệm GPU: đọc `registry.json` + log `experiments/<exp>/out/gpu/`, **phân tích lỗi trên OOF** (lát cắt,
+mẫu sai nặng nhất, so với thí nghiệm cha), viết Kết quả & Phân tích vào `NOTES.md` (dự đoán đúng hay sai, vì sao),
+cập nhật `plan.md`, rồi chọn tiếp theo theo giai đoạn ngân sách (`labrat budget`):
+- `explore` (20% đầu): baseline + EDA + các hướng có căn cứ khác nhau về cơ chế; ưu tiên A/B song song.
+- `exploit` (60%): đào sâu 1–2 cơ chế hiệu quả nhất, kế thừa `--parent`, ablation để biết phần nào đóng góp.
+- `final` (20%): hợp nhất các ý tưởng đã kiểm chứng vào MỘT mô hình, ablation cuối, chạy dài cấu hình tốt nhất.
+  KHÔNG ensemble / bỏ phiếu / seed averaging.
 
 Mỗi thí nghiệm thay MỘT yếu tố chính. Cải thiện là thật khi > `min_delta` và đáng kể so với `cv_std`.
 Lỗi: đọc `last_errors`, tự sửa; 2 lần lỗi cùng nguyên nhân → hỏi người dùng.
 
 Kết thúc: viết `competitions/<slug>/report_notes.json`
 ```json
-{"summary": "3–5 câu", "insights": ["... kèm số liệu"],
+{"summary": "3–5 câu", "insights": ["<phát hiện về dữ liệu/mô hình> — <bằng chứng số liệu> — <vì sao>"],
  "next_directions": [{"title": "...", "why": "căn cứ", "cost": "~4h GPU", "expected_gain": "+0.002 CV"}],
  "stop_reason": "..."}
 ```
@@ -267,7 +313,7 @@ dropbox/<tên>/        dữ liệu người dùng thả vào (chỉ đọc với
 - Ghi kết quả vào `$LABRAT_METRICS_PATH` (JSON, khóa `cv`, tùy chọn `cv_std`).
 - File kết quả nhỏ (oof, dự đoán, biểu đồ) vào `$LABRAT_OUTPUT_DIR`. File nặng (pretrained, checkpoint trung gian,
   cache đặc trưng) vào `$LABRAT_SCRATCH`. Cuối phiên, runner tự chuyển mọi file > 200 MB ra khỏi output (xem
-  `outputs_pruned` trong metrics.json). Cần giữ một file lớn trên Kaggle (vd `best_model.pt` để ensemble) → khai báo
+  `outputs_pruned` trong metrics.json). Cần giữ một file lớn trên Kaggle (vd `best_model.pt` để phân tích lỗi hay tiếp tục huấn luyện) → khai báo
   trong job.yaml: `keep_outputs: ["outputs/best_model.pt"]`.
 - VPS chỉ tải về metrics/log/csv/ảnh/oof nhỏ (≤ 50 MB/file). Cần thêm file → job.yaml `fetch_outputs: "<regex>"`.
 - `time.time() > $LABRAT_DEADLINE` → lưu checkpoint và thoát.

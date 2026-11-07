@@ -4,7 +4,7 @@
 #
 # Mục tiêu: tận dụng cả 2 GPU T4 trong một phiên (quota tính theo thời gian phiên).
 #   mode: parallel  → hàng đợi job, mỗi GPU một "slot", 2 job chạy đồng thời
-#                     (CUDA_VISIBLE_DEVICES=0 và =1). Hợp cho: fold CV, seed, biến thể
+#                     (CUDA_VISIBLE_DEVICES=0 và =1). Hợp cho: fold CV, A/B hai giả thuyết, ablation
 #                     siêu tham số, GBDT.
 #   mode: ddp       → 1 job huấn luyện phân tán bằng torchrun --nproc_per_node=<số GPU>.
 #                     Hợp cho: một mô hình DL lớn cần cả 2 GPU.

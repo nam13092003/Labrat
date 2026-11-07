@@ -172,7 +172,9 @@ def build(cfg: dict) -> Path:
         acc = next((r.get("account") for r in reversed(e.get("runs", [])) if r.get("kind") == "gpu"), "") or "—"
         cls = "best" if best and e["id"] == best["id"] else ""
         rows.append(f'<tr class="{cls}"><td class="n">{E(e["id"])}</td><td><b>{E(e.get("name",""))}</b>'
-                    f'<div class="muted">{E(e.get("hypothesis",""))}</div></td>'
+                    f'<div class="muted">{E(e.get("hypothesis",""))}</div>'
+                    + (f'<div class="muted">Căn cứ: {E(e["evidence"])}</div>' if e.get("evidence") else "")
+                    + '</td>'
                     f'<td class="n">{_fmt(e.get("cv"))}</td><td class="n">{_fmt(e.get("cv_std"), 4)}</td>'
                     f'<td class="n">{gh:.2f}h</td><td class="n">{E(acc)}</td><td><span class="st {E(e.get("status",""))}">'
                     f'{E(e.get("status",""))}</span></td></tr>')

@@ -8,7 +8,7 @@ from pathlib import Path
 
 import yaml
 
-from . import budget, housekeeping, kaggle_ops
+from . import budget, housekeeping, kaggle_ops, policy
 from .bundle import build_bundle, slugify
 from .accounts import get_account, load_accounts, run_account
 from .config import TEMPLATES, comp_dir
@@ -28,8 +28,10 @@ def list_templates() -> list[str]:
 
 
 def new_experiment(cfg: dict, *, name: str, hypothesis: str, template: str | None = None,
-                   parent: str | None = None) -> dict:
+                   parent: str | None = None, evidence: str | None = None) -> dict:
     reg = registry_for(cfg)
+    policy.check_idea(cfg, name, hypothesis)
+    policy.check_evidence(cfg, evidence, len(reg.experiments))
     exp_id = reg.next_id()
     folder = f"{exp_id}-{slugify(name)[:30]}"
     dest = comp_dir(cfg, cfg["slug"]) / "experiments" / folder
@@ -43,18 +45,22 @@ def new_experiment(cfg: dict, *, name: str, hypothesis: str, template: str | Non
     shutil.copytree(src_dir, dest, ignore=shutil.ignore_patterns("out", "_bundle*", "__pycache__", "NOTES.md"))
     (dest / "NOTES.md").write_text(
         f"# {exp_id} — {name}\n\n**Giả thuyết:** {hypothesis}\n\n"
+        f"**Căn cứ (dữ liệu / phân tích lỗi / paper):** {evidence or '(baseline)'}\n\n"
+        "**Cơ chế — vì sao kỳ vọng cải thiện:** \n\n**Dự đoán (nếu đúng thì CV / lát cắt nào đổi ra sao):** \n\n"
         f"**Kế thừa từ:** {parent or template}\n\n## Thay đổi so với cha\n\n- \n\n"
         "## Kết quả\n\n(điền sau khi chạy)\n\n## Phân tích & bài học\n\n- \n", encoding="utf-8")
     rec = reg.add({"id": exp_id, "folder": folder, "name": name, "hypothesis": hypothesis,
-                   "parent": parent, "template": template if not parent else None})
+                   "evidence": evidence, "parent": parent, "template": template if not parent else None})
     reg.save()
     return rec
 
 
 def record_result(cfg: dict, *, name: str, hypothesis: str, cv: float, cv_std: float | None = None,
-                  method: str = "llm", cost_usd: float = 0.0, notes: str = "", artifacts: list[str] | None = None) -> dict:
+                  method: str = "llm", cost_usd: float = 0.0, notes: str = "", artifacts: list[str] | None = None,
+                  evidence: str | None = None) -> dict:
     """Ghi kết quả một thí nghiệm KHÔNG chạy trên kernel (vd zero/few-shot qua API) vào sổ thí nghiệm."""
     reg = registry_for(cfg)
+    policy.check_idea(cfg, name, hypothesis, method)
     exp_id = reg.next_id()
     folder = f"{exp_id}-{slugify(name)[:30]}"
     d = comp_dir(cfg, cfg["slug"]) / "experiments" / folder
@@ -65,7 +71,7 @@ def record_result(cfg: dict, *, name: str, hypothesis: str, cv: float, cv_std: f
                                 f"{notes}\n\nFile: {', '.join(artifacts or [])}\n", encoding="utf-8")
     ts = now_iso()
     rec = reg.add({"id": exp_id, "folder": folder, "name": name, "hypothesis": hypothesis, "template": None,
-                   "parent": None, "status": "complete", "cv": float(cv), "cv_std": cv_std, "finished_at": ts,
+                   "evidence": evidence, "parent": None, "status": "complete", "cv": float(cv), "cv_std": cv_std, "finished_at": ts,
                    "method": method, "api_cost_usd": round(float(cost_usd), 4),
                    "metrics": {"cv": float(cv), "cv_std": cv_std, "method": method, "artifacts": artifacts or []},
                    "runs": [{"kind": "api", "pushed_at": ts, "finished_at": ts, "status": "complete",
@@ -85,6 +91,9 @@ def push(cfg: dict, exp_id: str, *, smoke: bool, force: bool = False, skip_smoke
     reg = registry_for(cfg)
     exp = reg.get(exp_id)
     est = est_hours or budget.typical_run_hours(reg)
+    job_file = exp_path(cfg, exp) / "job.yaml"
+    if job_file.exists():
+        policy.check_job(cfg, yaml.safe_load(job_file.read_text(encoding="utf-8")) or {})
 
     if exp.get("status") in ACTIVE and not force:
         raise SystemExit(f"{exp_id} đang chạy ({exp['status']}). Dùng `labrat poll` trước.")

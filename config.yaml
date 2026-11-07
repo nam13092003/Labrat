@@ -19,9 +19,14 @@ budget:
   reserve_hours: 1.0             # mỗi tài khoản luôn chừa lại, không bao giờ tiêu
   startup_overhead_hours: 0.05   # cộng thêm mỗi lần chạy (khởi động container)
   phases:                        # phân bổ ngân sách theo giai đoạn (tỉ lệ của project_gpu_hours)
-    explore: 0.2                 # baseline + thử nhanh nhiều hướng
-    exploit: 0.6                 # đào sâu các hướng tốt nhất
-    final: 0.2                   # ensemble, seed averaging, chạy dài
+    explore: 0.2                 # baseline + EDA/phân tích lỗi + thử các hướng có căn cứ
+    exploit: 0.6                 # đào sâu cơ chế của các hướng hiệu quả
+    final: 0.2                   # hợp nhất các ý tưởng đã kiểm chứng, ablation, chạy dài cấu hình tốt nhất
+
+research:                        # chính sách nghiên cứu (labrat/policy.py)
+  enforce: true                  # chặn dò/chọn/trung bình seed và bỏ phiếu/ensemble nhiều mô hình
+  require_evidence: true         # từ thí nghiệm thứ 2, `new-exp` phải có --evidence (quan sát làm căn cứ)
+  # forbid: {nhãn: regex}        # ghi đè danh sách mẫu bị chặn (mặc định trong policy.py)
 
 stop:
   patience: 4                    # số thí nghiệm GPU liên tiếp không cải thiện thì dừng

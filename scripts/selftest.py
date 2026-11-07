@@ -156,7 +156,8 @@ def _tests(data_dir: Path):
     ids = [exp["id"]]
     for i in range(3):
         ids.append(experiments.new_experiment(cfg, name=f"variant-{i}", hypothesis=f"biến thể {i}",
-                                              template="gbdt_folds")["id"])
+                                              template="gbdt_folds",
+                                              evidence=f"phân tích lỗi baseline: lát cắt {i} sai nhiều hơn 20%")["id"])
     reg = experiments.registry_for(cfg)
     for e in reg.experiments:
         e["status"] = "smoke_ok"
@@ -172,6 +173,54 @@ def _tests(data_dir: Path):
         check("Không còn tài khoản rảnh" in str(e), "lần đẩy thứ 4 bị chặn: mọi tài khoản đang bận")
     b = budget.summary(cfg, experiments.registry_for(cfg))
     check(abs(b["project_used"] - 4.5) < 0.01, f"kernel đang chạy được giữ chỗ theo ước tính: {b['project_used']}h")
+
+    print("3b) chính sách nghiên cứu: chặn dò seed / bỏ phiếu, bắt buộc căn cứ")
+    from labrat import policy
+    n_before = len(experiments.registry_for(cfg).experiments)
+    for nm, hy in [("best-seed", "chọn seed tốt nhất"), ("lgbm 5 seeds", "trung bình 5 seeds giảm dao động"),
+                   ("vote3", "bỏ phiếu đa số 3 mô hình"), ("blend", "blend lgbm + catboost"),
+                   ("ens", "ensemble OOF các mô hình tốt nhất"), ("x", "chạy nhiều seed rồi lấy trung bình")]:
+        try:
+            experiments.new_experiment(cfg, name=nm, hypothesis=hy, evidence="quan sát đủ dài để qua kiểm tra căn cứ")
+            check(False, f"phải chặn: {nm} / {hy}")
+        except SystemExit as e:
+            check("từ chối" in str(e), f"chặn '{hy}'")
+    try:
+        experiments.new_experiment(cfg, name="focal-loss", hypothesis="focal loss cho lớp hiếm")
+        check(False, "thiếu --evidence phải bị chặn")
+    except SystemExit as e:
+        check("--evidence" in str(e), "thí nghiệm thứ 2+ thiếu --evidence → bị chặn")
+    for ok_hy in ["loss xếp hạng pairwise khớp SRCC", "augmentation bất biến cao độ", "seed cố định 42, đổi pooling"]:
+        policy.check_idea(cfg, "ok", ok_hy)
+    check(True, "giả thuyết nghiên cứu bình thường (kể cả nhắc 'seed cố định') không bị chặn")
+    check(len(experiments.registry_for(cfg).experiments) == n_before, "thí nghiệm bị chặn không vào registry")
+    seed_job = {"mode": "parallel", "script": "src/train.py",
+                "jobs": [{"name": "s1", "args": "--fold 0 --seed 1"}, {"name": "s2", "args": "--fold 0 --seed 2"}]}
+    fold_job = {"mode": "parallel", "script": "src/train.py",
+                "jobs": [{"name": f"f{k}", "args": f"--fold {k}"} for k in range(5)]}
+    ab_job = {"mode": "parallel", "jobs": [{"name": "a", "args": "--loss mse"}, {"name": "b", "args": "--loss rank"}]}
+    env_job = {"mode": "parallel", "jobs": [{"name": "a", "env": {"SEED": "1"}}, {"name": "b", "env": {"SEED": "2"}}]}
+    for bad, label in [(seed_job, "2 job chỉ khác --seed"), (env_job, "2 job chỉ khác biến SEED"),
+                       ({"args": "--n-seeds 5"}, "tham số --n-seeds")]:
+        try:
+            policy.check_job(cfg, bad)
+            check(False, f"phải chặn job.yaml: {label}")
+        except SystemExit:
+            check(True, f"push chặn job.yaml: {label}")
+    policy.check_job(cfg, fold_job); policy.check_job(cfg, ab_job)
+    check(True, "job.yaml theo fold / A/B hai giả thuyết vẫn được")
+    vdir = experiments.exp_path(cfg, experiments.registry_for(cfg).get(ids[3]))
+    orig_job = (vdir / "job.yaml").read_text()
+    (vdir / "job.yaml").write_text(yaml.safe_dump(seed_job))
+    try:
+        experiments.push(cfg, ids[3], smoke=True)
+        check(False, "labrat push phải từ chối job dò seed")
+    except SystemExit as e:
+        check("seed" in str(e), "labrat push từ chối job.yaml dò seed trước khi tạo kernel")
+    (vdir / "job.yaml").write_text(orig_job)
+    cfg_off = dict(cfg, research={"enforce": False})
+    policy.check_idea(cfg_off, "vote", "bỏ phiếu"); policy.check_job(cfg_off, seed_job)
+    check(True, "research.enforce: false tắt được (chỉ khi người dùng yêu cầu)")
 
     print("4) poll giả lập → registry")
     finished = {outs[0]["kernel_ref"]}
@@ -692,7 +741,8 @@ def _tests(data_dir: Path):
     print("9) template torch_ddp (smoke, nếu có torch)")
     try:
         import torch  # noqa: F401
-        e2 = experiments.new_experiment(cfg, name="mlp", hypothesis="kiểm tra DDP", template="torch_ddp")
+        e2 = experiments.new_experiment(cfg, name="mlp", hypothesis="kiểm tra DDP", template="torch_ddp",
+                                         evidence="EDA: quan hệ phi tuyến giữa đặc trưng, thử mạng nơ-ron")
         d2, _ = build_bundle(experiments.exp_path(cfg, e2), cfg=cfg, exp=e2, username="user1", smoke=True)
         m2 = run_bundle_locally(d2, data_dir)
         check(m2["ok"] and m2["cv"] is not None, f"torch smoke cv={m2['cv']}")

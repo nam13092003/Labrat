@@ -19,7 +19,7 @@ Dữ liệu
   labrat dataset <slug> <folder> --name X [--message]   tải lên MỌI tài khoản (dataset riêng tư)
   labrat dataset-status <slug> <name>
 Thực nghiệm
-  labrat new-exp <slug> --name ... --hypothesis ... [--template gbdt_folds|torch_ddp] [--parent exp-003]
+  labrat new-exp <slug> --name ... --hypothesis ... --evidence ... [--template gbdt_folds|torch_ddp] [--parent exp-003]
   labrat push <slug> <exp> [--smoke] [--account acc2] [--skip-smoke] [--force] [--est-hours 1.5]
   labrat poll <slug> | wait <slug> | tick <slug> | status <slug> | budget <slug> | stop-check <slug>
 Model ngoài (OpenRouter)
@@ -218,7 +218,7 @@ def cmd_record(a):
     cfg = load_config(a.slug)
     rec = experiments.record_result(cfg, name=a.name, hypothesis=a.hypothesis, cv=a.cv, cv_std=a.cv_std,
                                     method=a.method, cost_usd=a.cost_usd, notes=a.notes or "",
-                                    artifacts=a.artifact)
+                                    artifacts=a.artifact, evidence=a.evidence)
     out({"exp": rec["id"], "cv": rec["cv"], "method": rec["method"]})
 
 
@@ -271,7 +271,7 @@ def cmd_dataset_status(a):
 def cmd_new_exp(a):
     cfg = load_config(a.slug)
     rec = experiments.new_experiment(cfg, name=a.name, hypothesis=a.hypothesis, template=a.template,
-                                     parent=a.parent)
+                                     parent=a.parent, evidence=a.evidence)
     out({"exp": rec["id"], "folder": str(experiments.exp_path(cfg, rec)),
          "next": "Sửa src/ và job.yaml, rồi `labrat push --smoke`"})
 
@@ -430,6 +430,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--cv-std", type=float); s.add_argument("--method", default="llm")
     s.add_argument("--cost-usd", type=float, default=0.0); s.add_argument("--notes")
     s.add_argument("--artifact", action="append", default=[])
+    s.add_argument("--evidence", help="quan sát làm căn cứ cho giả thuyết")
     s = add("clean", cmd_clean); s.add_argument("--dry-run", action="store_true")
     add("disk", cmd_disk)
     s = add("page", cmd_page, "url"); s.add_argument("--slug")
@@ -443,6 +444,8 @@ def build_parser() -> argparse.ArgumentParser:
     s = add("new-exp", cmd_new_exp, "slug")
     s.add_argument("--name", required=True); s.add_argument("--hypothesis", required=True)
     s.add_argument("--template"); s.add_argument("--parent")
+    s.add_argument("--evidence", help="BẮT BUỘC từ thí nghiệm thứ 2: quan sát từ dữ liệu/phân tích lỗi/paper "
+                   "làm căn cứ cho giả thuyết (kèm số liệu)")
     s = add("push", cmd_push, "slug", "exp")
     s.add_argument("--smoke", action="store_true"); s.add_argument("--skip-smoke", action="store_true")
     s.add_argument("--force", action="store_true"); s.add_argument("--est-hours", type=float)

@@ -142,7 +142,7 @@ Cần nhớ:
 
 **Trong một phiên (2×T4).** Quota tính theo thời gian phiên, nên runner giữ cả hai GPU bận:
 
-- `mode: parallel` (template `gbdt_folds`): hàng đợi job, mỗi GPU một slot. Dùng cho fold, A/B, seed.
+- `mode: parallel` (template `gbdt_folds`): hàng đợi job, mỗi GPU một slot. Dùng cho fold, A/B hai giả thuyết, ablation (không dùng để dò seed — bị chặn).
 - `mode: ddp` (template `torch_ddp`): `torchrun --nproc_per_node=2`, AMP fp16, checkpoint, deadline đồng bộ giữa các rank.
 
 **Giữa các tài khoản.** `labrat push` tự chọn tài khoản rảnh còn nhiều quota nhất. Với 3 tài khoản có thể chạy 3 thí

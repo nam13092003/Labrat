@@ -23,6 +23,6 @@ pip: []                # gói cần cài thêm (cần enable_internet)
 dataset_sources: []    # dataset riêng cho thí nghiệm này, dạng "user/slug"
 
 # Biến thể khác cho 2 GPU:
-#   - seed averaging: 2 job cùng cấu hình khác --seed, mỗi job 1 GPU
+#   - KHÔNG dùng để chạy nhiều seed (bị `labrat push` từ chối); seed cố định, độ dao động xem qua cv_std giữa các fold
 #   - so sánh A/B trong 1 phiên: job "a" và job "b" với tham số khác nhau;
 #     không có `post` thì runner chọn biến thể có CV tốt nhất làm điểm của thí nghiệm.
