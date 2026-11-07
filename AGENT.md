@@ -7,8 +7,8 @@ bằng `python -m labrat ...` (in JSON).
 
 ## Ba kiểu việc người dùng giao
 
-1. **Nghiên cứu một cuộc thi**: Kaggle (link/slug) hoặc cuộc thi trên trang web khác (ví dụ thử thách học thuật như
-   xacle.org) → hiểu bài → tìm tài liệu → thực nghiệm → báo cáo.
+1. **Nghiên cứu một cuộc thi**: Kaggle (link/slug) hoặc cuộc thi trên trang web khác (thử thách học thuật,
+   workshop, hội nghị...) → hiểu bài → tìm tài liệu → thực nghiệm → báo cáo.
 2. **Nghiên cứu một paper và đề xuất hướng thực nghiệm**: arXiv id / link / file PDF → phân tích sâu →
    bảng đề xuất thực nghiệm (có thể chạy luôn nếu người dùng đồng ý hoặc đã yêu cầu).
 3. **Bài toán trên dữ liệu người dùng gửi** (dự án `custom`): file qua Telegram hoặc link → đưa lên
@@ -63,9 +63,10 @@ và báo cáo phải giải thích được VÌ SAO một cách làm tốt hơn.
 4. **Kết luận cả khi thất bại**: dự đoán sai thì cơ chế nào bị bác bỏ, rút ra điều gì về dữ liệu. Ghi vào insights.
 
 **Nguồn ý tưởng nên ưu tiên** (mỗi chu kỳ lập kế hoạch có ít nhất MỘT ý tưởng sáng tạo, không phải công thức sẵn):
-- *Đặt lại bài toán*: loss khớp metric (metric xếp hạng như SRCC → loss xếp hạng/pairwise, hoặc dự đoán hạng; QWK →
-  hồi quy + ngưỡng tối ưu; F1 → tối ưu ngưỡng theo lớp), biến đổi nhãn (log, rank, phân phối nhãn thay cho điểm
-  trung bình khi nhiều người gán), multi-task với nhãn phụ có sẵn, chia bài toán thành các bước.
+- *Đặt lại bài toán*: hàm mất mát / đầu ra khớp với CÁCH metric của bài chấm điểm (metric đo thứ tự → học thứ tự;
+  metric có ngưỡng → tối ưu ngưỡng; metric bất đối xứng → loss bất đối xứng...), biến đổi nhãn cho hợp phân phối,
+  dùng thông tin nhãn phong phú hơn nếu có (nhiều người gán, nhãn phụ → multi-task), chia bài toán thành các bước.
+  Các ví dụ ở đây chỉ minh hoạ; ý tưởng cụ thể phải xuất phát từ dữ liệu và metric của chính bài đang làm.
 - *Thiên kiến quy nạp của mô hình*: chọn kiến trúc khớp cấu trúc dữ liệu (tuần tự, tập hợp, đồ thị, đa phương thức,
   thứ bậc), cách trộn modality (late/early/cross-attention), pooling, độ phân giải đầu vào, pretrained phù hợp miền.
 - *Dữ liệu*: augmentation dựa trên **bất biến thật** của bài toán (không đổi nhãn), xử lý nhiễu nhãn
@@ -218,7 +219,7 @@ rồi `python -m labrat report <slug> --send` (thẻ HTML qua Telegram) và tr�
 
 ## Quy trình A2 — Cuộc thi NGOÀI Kaggle (trang web riêng)
 
-Người dùng gửi link trang cuộc thi (vd `https://xacle.org/2027/description.html`). Bridge KHÔNG tải link trang web;
+Người dùng gửi link trang cuộc thi (vd `https://<site-cuộc-thi>/description.html`). Bridge KHÔNG tải link trang web;
 bạn tự đọc:
 ```
 python -m labrat init <slug> --kind custom --metric "<metric>" --direction ... --title "<tên cuộc thi>" --gpu-hours <N>

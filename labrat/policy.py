@@ -56,7 +56,7 @@ def check_evidence(cfg: dict, evidence: str | None, n_existing: int) -> None:
         return  # thí nghiệm đầu tiên (baseline) không cần căn cứ
     if not evidence or len(evidence.strip()) < 20:
         raise SystemExit("Thiếu --evidence: ghi quan sát cụ thể làm căn cứ cho giả thuyết (kèm số liệu nếu có), "
-                         "vd 'phân tích lỗi exp-004: 70% sai ở clip < 3s; SRCC nhóm này 0.21 so với 0.58 toàn tập'. "
+                         "vd 'phân tích lỗi exp-004: 70% lỗi nằm ở nhóm <X> (chiếm 15% dữ liệu); metric trên nhóm này 0.21 so với 0.58 toàn tập'. "
                          + GUIDANCE)
 
 

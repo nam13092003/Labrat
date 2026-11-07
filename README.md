@@ -64,7 +64,7 @@ Cờ dòng lệnh của các harness thay đổi theo phiên bản. Nếu `pytho
 /help  /status  /accounts  /usage  /disk  /clean  /new  /stop <slug>  /resume <slug>  /dropbox  /scan  /get <link>  /cancel
 
 Nghiên cứu cuộc thi https://www.kaggle.com/competitions/playground-series-s6e1, ngân sách 15h GPU
-Nghiên cứu cuộc thi https://xacle.org/2027/description.html, ngân sách 15h GPU   (cuộc thi ngoài Kaggle)
+Nghiên cứu cuộc thi https://<site-cuộc-thi>/description.html, ngân sách 15h GPU   (cuộc thi ngoài Kaggle)
 Đọc paper 2406.12345 và đề xuất hướng thực nghiệm cho bài phân loại ảnh y tế
 [gửi file train.csv] Đây là dữ liệu dự đoán churn, metric AUC, ngân sách 10h
 https://huggingface.co/datasets/<org>/<tên>  phân loại cảm xúc, metric F1-macro

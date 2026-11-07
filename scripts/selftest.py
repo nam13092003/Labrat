@@ -190,7 +190,7 @@ def _tests(data_dir: Path):
         check(False, "thiếu --evidence phải bị chặn")
     except SystemExit as e:
         check("--evidence" in str(e), "thí nghiệm thứ 2+ thiếu --evidence → bị chặn")
-    for ok_hy in ["loss xếp hạng pairwise khớp SRCC", "augmentation bất biến cao độ", "seed cố định 42, đổi pooling"]:
+    for ok_hy in ["đổi loss cho khớp metric", "augmentation theo tính chất bất biến của dữ liệu", "seed cố định 42, đổi kiến trúc"]:
         policy.check_idea(cfg, "ok", ok_hy)
     check(True, "giả thuyết nghiên cứu bình thường (kể cả nhắc 'seed cố định') không bị chặn")
     check(len(experiments.registry_for(cfg).experiments) == n_before, "thí nghiệm bị chặn không vào registry")
