@@ -145,6 +145,71 @@ def _launch(cfg: dict, exp: dict, acc, *, smoke: bool, est: float, fidelity: str
     return run
 
 
+def notes_sections(cfg: dict, exp: dict) -> dict:
+    """Đọc các mục người viết trong NOTES.md: căn cứ, cơ chế, dự đoán, thay đổi so với cha."""
+    import re
+    f = exp_path(cfg, exp) / "NOTES.md"
+    t = f.read_text(encoding="utf-8") if f.exists() else ""
+    out = {}
+    for key, label in (("evidence", "Căn cứ"), ("mechanism", "Cơ chế"), ("prediction", "Dự đoán")):
+        m = re.search(r"\*\*" + label + r"[^*]*:\*\*[ \t]*(.*?)(?=\n\*\*|\n## |\Z)", t, re.S)
+        out[key] = (m.group(1).strip() if m else "")
+    m = re.search(r"## Thay đổi so với cha[ \t]*\n(.*?)(?=\n## |\Z)", t, re.S)
+    ch = m.group(1).strip() if m else ""
+    out["changes"] = "" if ch in ("", "-") else ch
+    return out
+
+
+def _is_first(reg: Registry, exp: dict) -> bool:
+    return bool(reg.experiments) and reg.experiments[0]["id"] == exp["id"]
+
+
+def check_ready(cfg: dict, reg: Registry, exp: dict) -> dict:
+    """Trước khi chạy GPU: NOTES.md phải nói rõ thí nghiệm sẽ làm gì (để báo người dùng)."""
+    secs = notes_sections(cfg, exp)
+    r = cfg.get("research", {}) or {}
+    if r.get("require_prediction", True) and policy.settings(cfg)["enforce"] and not _is_first(reg, exp) \
+            and len(secs["prediction"]) < 10:
+        raise SystemExit(f"Điền NOTES.md của {exp['id']} trước khi chạy GPU: mục **Dự đoán** (nếu giả thuyết đúng thì CV "
+                         "/ lát cắt nào đổi khoảng bao nhiêu), **Cơ chế** (vì sao), và **Thay đổi so với cha**. "
+                         "Nội dung này được gửi cho người dùng trước khi kernel chạy.")
+    return secs
+
+
+def announce(cfg: dict, reg: Registry, exp: dict, *, level: str, account: str | None, est: float | None,
+             seeds: list[int] | None = None) -> bool:
+    """Báo người dùng qua Telegram TRƯỚC khi đẩy kernel GPU."""
+    from . import telegram
+    if not (cfg.get("telegram", {}) or {}).get("announce_runs", True) or not telegram.enabled(cfg):
+        return False
+    E = telegram.esc
+    secs = notes_sections(cfg, exp)
+    clip = lambda x, n=350: (x[:n] + "…") if len(x) > n else x
+    lvl = {"full": "chạy đầy đủ", "quick": "bản rẻ (sàng lọc)",
+           "report": f"chốt kết quả, seed {', '.join(map(str, seeds or []))}"}.get(level, level)
+    lines = [f"🚀 <b>{E(cfg['slug'])} · {E(exp['id'])}</b> {E(exp.get('name', ''))} — {E(lvl)}",
+             f"<b>Giả thuyết:</b> {E(clip(exp.get('hypothesis', '')))}"]
+    ev = exp.get("evidence") or secs["evidence"]
+    if ev and ev != "(baseline)":
+        lines.append(f"<b>Căn cứ:</b> {E(clip(ev))}")
+    if exp.get("parent") or secs["changes"]:
+        lines.append(f"<b>Thay đổi so với {E(exp.get('parent') or 'nền')}:</b> {E(clip(secs['changes'] or '(chưa ghi)'))}")
+    if secs["mechanism"]:
+        lines.append(f"<b>Cơ chế:</b> {E(clip(secs['mechanism']))}")
+    if secs["prediction"]:
+        lines.append(f"<b>Dự đoán:</b> {E(clip(secs['prediction']))}")
+    try:
+        sm = budget.summary(cfg, reg)
+        bud = f" · dự án đã dùng {sm['project_used']}/{sm['project_cap']}h"
+    except Exception:
+        bud = ""
+    lines.append(f"⏱ {('tài khoản ' + E(account) + ' · ') if account else ''}~{est or '?'}h GPU{('/seed' if level == 'report' else '')}{bud}")
+    try:
+        return telegram.send_message("\n".join(lines), cfg)
+    except Exception:
+        return False
+
+
 def push(cfg: dict, exp_id: str, *, smoke: bool, quick: bool = False, force: bool = False,
          skip_smoke: bool = False, est_hours: float | None = None, account: str | None = None) -> dict:
     """Đẩy thí nghiệm lên Kaggle.
@@ -174,8 +239,13 @@ def push(cfg: dict, exp_id: str, *, smoke: bool, quick: bool = False, force: boo
         if (chk["stop"] or chk["pause_until_reset"]) and not force:
             raise SystemExit("Không đẩy: " + "; ".join(chk["reasons"]))
 
+    if not smoke:
+        check_ready(cfg, reg, exp)
     acc = _choose_account(cfg, est, smoke=smoke, account=account, force=force)
+    announced = False if smoke else announce(cfg, reg, exp, level="quick" if quick else "full", account=acc.name,
+                                              est=round(est, 2))
     run = _launch(cfg, exp, acc, smoke=smoke, est=est, fidelity="quick" if quick else "full")
+    run["announced"] = announced
     exp["status"] = "smoke_running" if smoke else "running"
     reg.save()
     return {"exp": exp_id, "account": acc.name, "kernel_ref": run["kernel_ref"],
@@ -227,6 +297,8 @@ def report_seeds(cfg: dict, exp_id: str, n: int | None = None, *, est_hours: flo
     todo = [s for s in seeds[1:] if s not in have]
     est = est_hours or main.get("gpu_hours") or budget.typical_run_hours(reg)
     pushed, waiting = [], []
+    if todo:
+        announce(cfg, reg, exp, level="report", account=None, est=round(est, 2), seeds=seeds)
     for s in todo:
         chk = budget.stop_check(cfg, reg, est)
         if (chk["stop"] or chk["pause_until_reset"]) and not force:

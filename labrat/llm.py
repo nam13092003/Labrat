@@ -1,6 +1,6 @@
 """Gọi model bất kỳ trên OpenRouter khi có lợi cho tác vụ (agent dùng qua `labrat llm …`).
 
-Ví dụ khi nào nên dùng (xem AGENT.md):
+Ví dụ khi nào nên dùng (xem docs/agent/llm.md):
   - đọc ảnh / biểu đồ / hình trong paper khi model của harness không có thị giác
   - PDF scan (OCR), tài liệu rất dài vượt context của harness
   - xin ý kiến thứ hai từ model mạnh khi bế tắc (review kế hoạch, tìm bug)

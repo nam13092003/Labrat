@@ -162,5 +162,5 @@ def wake_message(it: dict) -> str:
         head += f"\nMô tả của người dùng (task.md):\n{it['task']}"
     else:
         head += "\nKhông có task.md: nếu chưa rõ mục tiêu/metric/ngân sách, hãy hỏi người dùng trước khi tiêu GPU."
-    head += "\nLàm theo Quy trình C trong AGENT.md (PDF → Quy trình B)."
+    head += "\nLàm theo Quy trình C trong docs/agent/quy-trinh.md (PDF → Quy trình B)."
     return head

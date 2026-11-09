@@ -19,18 +19,35 @@ import re
 DEFAULT_FORBID = {
     "dò/chọn/trung bình seed": (
         r"(best|tốt\s*nhất|optimal|tối\s*ưu|lucky)[\s_-]*seed|seed[\s_-]*(search|sweep|select\w*|tuning|lottery|hunt)"
-        r"|(dò|chọn|tìm|quét|thử)\s+(nhiều\s+)?seed|multi[\s_-]*seeds?|nhiều\s+seed|\b([2-9]|\d{2,})\s*seeds?\b"
-        r"|seeds?[\s_-]*(avg|averag\w*|ensembl\w*|bagging|mean)|trung\s*bình\s*(các\s*|nhiều\s*)?seed"),
-    "bỏ phiếu/ensemble nhiều mô hình": (
-        r"\bvot(e|es|ing)\b|bỏ\s*phiếu|majority|đa\s*số\s*phiếu|\bensembl\w*|\bblend(ing|ed)?\b|\bstacking\b"
-        r"|\bbagging\b|kết\s*hợp\s*nhiều\s*(mô\s*hình|model)|trung\s*bình\s*(nhiều\s*|các\s*)?(mô\s*hình|model)"
-        r"|average\s+of\s+(the\s+)?models|model\s+averag\w*"),
+        r"|(dò|chọn|tìm|quét|thử)\s+(nhiều\s+|các\s+)?seed|multi[\s_-]*seeds?|nhiều\s+seed"
+        r"|seeds?[\s_-]*(avg|averag\w*|ensembl\w*|bagging|mean)|trung\s*bình\s*(\d+\s*|các\s*|nhiều\s*)?seeds?"
+        r"|\b([2-9]|\d{2,})\s*seeds?\b.{0,30}(trung\s*bình|avg|averag|mean|ensembl|vote|bỏ\s*phiếu)"),
+    "ensemble nhiều mô hình": (
+        r"\bvoting\s*(classifier|regressor|ensemble)|\b(hard|soft|majority)[\s_-]*vot\w*|bỏ\s*phiếu|đa\s*số\s*phiếu"
+        r"|\bvote\s+(giữa|của|between|across)"
+        r"|ensembl\w*(\s+\S+){0,4}?\s+(models?|mô\s*hình|backbones?|kiến\s*trúc|architectures?|oofs?)\b"
+        r"|(models?|mô\s*hình|backbones?)\s+ensembl\w*"
+        r"|\bblend\w*\s+(of\s+|các\s+|nhiều\s+)?(models?|mô\s*hình|predictions?|dự\s*đoán|oofs?)\b|\bblend\w*\s+\S+\s*\+"
+        r"|\bstack\w*\s+(of\s+|các\s+|nhiều\s+)?(models?|mô\s*hình|predictions?|dự\s*đoán|oofs?)\b"
+        r"|meta[\s-]*(model|learner|mô\s*hình)"
+        r"|kết\s*hợp\s*(dự\s*đoán\s*(của\s*)?)?(nhiều|các|hai|ba|\d+)\s*(mô\s*hình|models?)"
+        r"|trung\s*bình\s*(dự\s*đoán\s*(của\s*)?)?(nhiều|các|hai|ba|\d+)\s*(mô\s*hình|models?)"
+        r"|average\s+(of\s+)?(the\s+)?(\w+\s+)?(models|predictions\s+of\s+\w+\s+models)"
+        r"|\b(lgbm|lightgbm|xgb\w*|catboost|cnn|lstm|bert|vit)\s*\+\s*(lgbm|lightgbm|xgb\w*|catboost|cnn|lstm|bert|vit)\b"),
 }
+
+# Kỹ thuật cải thiện MỘT mô hình — được phép dù có chữ "ensemble", "blend", "majority"... (bỏ khỏi văn bản trước khi xét)
+ALLOW = (r"test[\s-]*time[\s-]*augment\w*(\s+ensembl\w*)?|\btta\b|\bema\b|exponential\s+moving\s+average|\bswa\b"
+         r"|stochastic\s+weight\s+averag\w*|snapshot\s+ensembl\w*|checkpoint\s+averag\w*|model\s+averaging\s*\(ema\)"
+         r"|mix[\s-]*up\s*(blend\w*)?|cut[\s-]*mix|bagging_(fraction|freq)|feature_fraction|bagging\s+(feature|fraction)"
+         r"|majority\s+class|lớp\s+đa\s+số|minority\s+class|stack\w*\s+(thêm\s+)?\d*\s*(tầng|lớp|layers?|blocks?)"
+         r"|multi[\s-]*sample\s+dropout|k[\s-]*fold|fold\s+averag\w*|trung\s*bình\s*(các\s*)?fold")
 
 GUIDANCE = ("Labrat ưu tiên NGHIÊN CỨU thay vì cày điểm: hãy tìm cải thiện từ tính chất dữ liệu (phân phối, nhiễu nhãn, "
             "lệch train/test, cấu trúc nhóm/thời gian), phân tích lỗi của thí nghiệm trước, cơ chế/thiên kiến quy nạp "
             "của mô hình, cách đặt lại bài toán (loss khớp metric, multi-task, biến đổi nhãn), hoặc ý tưởng từ paper. "
-            "Xem mục 'Triết lý nghiên cứu' trong AGENT.md.")
+            "Các kỹ thuật cải thiện MỘT mô hình (TTA, EMA/SWA, snapshot, mixup, k-fold) vẫn được dùng. "
+            "Xem AGENT.md mục 'Mục tiêu và thứ tự ưu tiên' và docs/agent/nghien-cuu.md.")
 
 
 def settings(cfg: dict) -> dict:
@@ -43,7 +60,7 @@ def check_idea(cfg: dict, *texts: str) -> None:
     s = settings(cfg)
     if not s["enforce"]:
         return
-    blob = " ".join(t for t in texts if t)
+    blob = re.sub(ALLOW, " ", " ".join(t for t in texts if t), flags=re.IGNORECASE)
     for label, pat in s["forbid"].items():
         m = re.search(pat, blob, re.IGNORECASE)
         if m:
@@ -55,9 +72,10 @@ def check_evidence(cfg: dict, evidence: str | None, n_existing: int) -> None:
     if not s["enforce"] or not s["require_evidence"] or n_existing == 0:
         return  # thí nghiệm đầu tiên (baseline) không cần căn cứ
     if not evidence or len(evidence.strip()) < 20:
-        raise SystemExit("Thiếu --evidence: ghi quan sát cụ thể làm căn cứ cho giả thuyết (kèm số liệu nếu có), "
-                         "vd 'phân tích lỗi exp-004: 70% lỗi nằm ở nhóm <X> (chiếm 15% dữ liệu); metric trên nhóm này 0.21 so với 0.58 toàn tập'. "
-                         + GUIDANCE)
+        raise SystemExit("Thiếu --evidence (≥ 20 ký tự): căn cứ cho giả thuyết. Hai dạng đều được: "
+                         "luồng nền mạnh — 'prior_work: đội top kỳ trước dùng X, +0.01'; luồng nghiên cứu — quan sát có "
+                         "số liệu, vd 'phân tích lỗi exp-004: 70% lỗi ở nhóm <X> (15% dữ liệu), metric nhóm này 0.21 so "
+                         "với 0.58 toàn tập'.")
 
 
 def check_prior_work(cfg: dict, project_dir, n_existing: int) -> None:

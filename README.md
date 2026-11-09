@@ -154,18 +154,18 @@ tài khoản, và kernel đang chạy được giữ chỗ theo thời gian ư�
 ## Phương pháp nghiên cứu
 
 Labrat hướng tới kết quả viết được paper: cạnh tranh với lời giải mạnh nhất, phương pháp có cơ sở, con số đáng tin.
+Sổ tay agent gồm `AGENT.md` (luật chung, < 200 dòng, nạp mỗi lượt) và `docs/agent/*.md` (chi tiết, agent đọc khi cần).
 
-- **Xuất phát từ lời giải mạnh nhất.** Từ thí nghiệm thứ 2, dự án phải có `prior_work.md` (đội top các kỳ trước, SOTA:
-  phương pháp, điểm, cơ chế, điều còn bỏ ngỏ). Thí nghiệm nền tái hiện lời giải mạnh nhất.
-- **Mỗi thí nghiệm có căn cứ.** `new-exp --evidence "<quan sát + số liệu>"` từ dữ liệu, phân tích lỗi hoặc paper.
-- **Không cày điểm.** Dò seed, chạy nhiều seed lúc khám phá, bỏ phiếu / blend / stack / ensemble bị chặn ở
-  `new-exp`, `record`, `push` (`research.enforce` trong `config.yaml`).
-- **Ba mức chạy.** `push --smoke` (CPU, kiểm tra code) → `push --quick` (GPU bản rẻ: ít fold / ít epoch, ≤ 1.5h, để
-  sàng lọc nhiều ý tưởng) → `push` (đầy đủ).
+- **Nền mạnh trước.** Từ thí nghiệm thứ 2 cần `prior_work.md` (lời giải top / SOTA). Tái hiện lời giải mạnh nhất cộng các
+  công thức tiêu chuẩn — ở luồng này được gộp nhiều thay đổi, căn cứ ghi `prior_work: ...`.
+- **Cải tiến nghiên cứu** từ dữ liệu, phân tích lỗi, cơ chế mô hình: `new-exp --evidence "<quan sát + số liệu>"`.
+- **Không cày điểm.** Ensemble / bỏ phiếu / blend / stack nhiều mô hình và dò seed bị chặn ở `new-exp`, `record`, `push`
+  (`research.enforce`). Kỹ thuật cải thiện MỘT mô hình (TTA, EMA/SWA, snapshot, mixup, k-fold) vẫn được dùng.
+- **Báo trước khi chạy.** Mỗi lần đẩy GPU, Telegram nhận: giả thuyết, căn cứ, thay đổi so với cha, cơ chế, dự đoán,
+  tài khoản, giờ GPU (`telegram.announce_runs`). Push GPU bị chặn nếu `NOTES.md` chưa ghi Dự đoán.
+- **Ba mức chạy.** `push --smoke` (CPU) → `push --quick` (GPU bản rẻ, tuỳ chọn cho ý tưởng tốn GPU) → `push`.
 - **Chốt kết quả.** `labrat report-seeds <slug> <exp> --n 3`: chạy lại cấu hình đã chốt với nhiều seed (mỗi seed một
-  tài khoản), báo cáo mean ± std của TẤT CẢ seed. Không chọn seed, không đổi `cv`; bị chặn nếu code đã đổi sau lần
-  chạy chính; tối đa 6 thí nghiệm (phương pháp cuối, nền mạnh nhất, ablation chính). Seed chỉ đổi khởi tạo mô hình
-  (`LABRAT_SEED`), cách chia fold luôn cố định.
+  tài khoản), báo cáo mean ± std của TẤT CẢ seed; chặn nếu code đã đổi; tối đa 6 thí nghiệm. Fold luôn cố định.
 
 ## Chi phí LLM và cache
 

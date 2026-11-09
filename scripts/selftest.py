@@ -172,7 +172,38 @@ def _tests(data_dir: Path):
     for e in reg.experiments:
         e["status"] = "smoke_ok"
     reg.save()
+    try:
+        experiments.push(cfg, ids[1], smoke=False, est_hours=1.5)
+        check(False, "push GPU khi NOTES chưa có Dự đoán phải bị chặn")
+    except SystemExit as e:
+        check("Dự đoán" in str(e) and not pushed, "push GPU bị chặn khi NOTES.md chưa ghi Dự đoán (trước khi tạo kernel)")
+
+    def fill_notes(eid, k):
+        nf = experiments.exp_path(cfg, experiments.registry_for(cfg).get(eid)) / "NOTES.md"
+        t = nf.read_text(encoding="utf-8")
+        t = t.replace("**Cơ chế — vì sao kỳ vọng cải thiện:** ", f"**Cơ chế — vì sao kỳ vọng cải thiện:** cơ chế {k}")
+        t = t.replace("**Dự đoán (nếu đúng thì CV / lát cắt nào đổi ra sao):** ",
+                      f"**Dự đoán (nếu đúng thì CV / lát cắt nào đổi ra sao):** CV tăng ~0.00{k}, nhóm cat hiếm")
+        t = t.replace("## Thay đổi so với cha\n\n- ", f"## Thay đổi so với cha\n\n- đổi learning rate {k}")
+        nf.write_text(t, encoding="utf-8")
+    for k, x in enumerate(ids[1:], 1):
+        fill_notes(x, k)
+    secs = experiments.notes_sections(cfg, experiments.registry_for(cfg).get(ids[1]))
+    check(secs["prediction"].startswith("CV tăng") and secs["mechanism"] == "cơ chế 1"
+          and secs["changes"] == "- đổi learning rate 1" and "lát cắt 0" in secs["evidence"],
+          "đọc được Căn cứ / Cơ chế / Dự đoán / Thay đổi từ NOTES.md")
+    from labrat import telegram as _tg
+    sent_msgs = []
+    _en, _sm = _tg.enabled, _tg.send_message
+    _tg.enabled = lambda cfg=None: True
+    _tg.send_message = lambda text, cfg=None, parse_mode="HTML": sent_msgs.append((text, len(pushed))) or True
     outs = [experiments.push(cfg, x, smoke=False, est_hours=1.5) for x in ids[:3]]
+    _tg.enabled, _tg.send_message = _en, _sm
+    check(len(sent_msgs) == 3 and [n for _, n in sent_msgs] == [0, 1, 2],
+          "báo Telegram TRƯỚC mỗi lần đẩy GPU (trước khi kernel được tạo)")
+    msg = sent_msgs[1][0]
+    check("Giả thuyết" in msg and "Căn cứ" in msg and "Dự đoán" in msg and "CV tăng ~0.001" in msg
+          and "đổi learning rate 1" in msg and "1.5h GPU" in msg, "nội dung báo trước: giả thuyết, căn cứ, thay đổi, dự đoán, giờ GPU")
     check(sorted(o["account"] for o in outs) == ["a1", "a2", "a3"], "3 thí nghiệm → 3 tài khoản khác nhau")
     check(all(p[1] == "NvidiaTeslaT4" and p[2]["id"].startswith(f"user{p[0][1]}/") for p in pushed),
           "accelerator T4 x2, kernel thuộc đúng tài khoản")
@@ -200,9 +231,19 @@ def _tests(data_dir: Path):
         check(False, "thiếu --evidence phải bị chặn")
     except SystemExit as e:
         check("--evidence" in str(e), "thí nghiệm thứ 2+ thiếu --evidence → bị chặn")
-    for ok_hy in ["đổi loss cho khớp metric", "augmentation theo tính chất bất biến của dữ liệu", "seed cố định 42, đổi kiến trúc"]:
+    for ok_hy in ["đổi loss cho khớp metric", "augmentation theo tính chất bất biến của dữ liệu", "seed cố định 42, đổi kiến trúc",
+                  "majority class chiếm 80%", "test-time augmentation ensemble (TTA)", "mixup blending ảnh",
+                  "EMA trọng số (model averaging)", "snapshot ensemble trong 1 lần huấn luyện", "bagging_fraction 0.8",
+                  "stacking thêm 2 tầng transformer", "trung bình các fold"]:
         policy.check_idea(cfg, "ok", ok_hy)
-    check(True, "giả thuyết nghiên cứu bình thường (kể cả nhắc 'seed cố định') không bị chặn")
+    check(True, "kỹ thuật cải thiện MỘT mô hình (TTA, EMA, mixup, snapshot, bagging GBDT, majority class) không bị chặn")
+    for bad_hy in ["voting classifier", "kết hợp nhiều mô hình", "ensemble of 3 backbones", "average of five models",
+                   "stacking các mô hình bằng meta-learner", "5 seeds rồi lấy trung bình"]:
+        try:
+            policy.check_idea(cfg, "x", bad_hy); check(False, f"phải chặn: {bad_hy}")
+        except SystemExit:
+            pass
+    check(True, "vẫn chặn ensemble nhiều mô hình / nhiều seed")
     check(len(experiments.registry_for(cfg).experiments) == n_before, "thí nghiệm bị chặn không vào registry")
     seed_job = {"mode": "parallel", "script": "src/train.py",
                 "jobs": [{"name": "s1", "args": "--fold 0 --seed 1"}, {"name": "s2", "args": "--fold 0 --seed 2"}]}
