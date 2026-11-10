@@ -50,7 +50,7 @@ def collect_files(src: Path) -> dict[str, str]:
 
 
 def build_bundle(exp_dir: Path, *, cfg: dict, exp: dict, username: str, smoke: bool, quick: bool = False,
-                 seed: int | None = None) -> tuple[Path, str]:
+                 seed: int | None = None, extra_kernel_sources: list[str] | None = None) -> tuple[Path, str]:
     exp_dir = Path(exp_dir)
     job = yaml.safe_load((exp_dir / "job.yaml").read_text(encoding="utf-8")) or {}
     files = collect_files(exp_dir / "src")
@@ -91,6 +91,9 @@ def build_bundle(exp_dir: Path, *, cfg: dict, exp: dict, username: str, smoke: b
     own = list(cfg.get("own_datasets") or []) + list(job.get("own_datasets") or [])
     datasets = (list(cfg.get("datasets") or []) + list(job.get("dataset_sources") or [])
                 + [f"{username}/{d}" for d in own])
+    from . import kfetch  # import muộn: kfetch dùng slugify của module này
+    kernel_srcs = sorted(set(list(job.get("kernel_sources") or []) + list(extra_kernel_sources or [])
+                             + kfetch.kernel_sources_for(cfg, job, username)))
     meta = {
         "id": ref,
         "title": title,
@@ -102,7 +105,7 @@ def build_bundle(exp_dir: Path, *, cfg: dict, exp: dict, username: str, smoke: b
         "enable_internet": bool(k.get("enable_internet", True)),
         "dataset_sources": sorted(set(datasets)),
         "competition_sources": [] if cfg.get("no_competition_source") else [cfg["slug"]],
-        "kernel_sources": list(job.get("kernel_sources") or []),
+        "kernel_sources": kernel_srcs,
         "model_sources": list(job.get("model_sources") or []),
     }
     (out / "kernel-metadata.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")

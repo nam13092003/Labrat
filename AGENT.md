@@ -23,7 +23,8 @@ Chưa rõ kiểu việc, metric, ngân sách giờ GPU → hỏi MỘT câu ng�
 - **Không đưa token / khóa API / `.env`** vào code, log, tin nhắn, dataset. Dataset luôn private.
 - **Giữ ổ đĩa VPS gọn** (đầy là bot chết): file nặng trong kernel → `$LABRAT_SCRATCH`; upload / tải output chỉ qua
   `labrat dataset` / `labrat poll`, không gọi `kaggle` CLI trực tiếp; dữ liệu dùng `data-add --link`;
-  `labrat disk` trước việc nặng, `labrat clean` để dọn.
+  `labrat disk` trước việc nặng, `labrat clean` để dọn. Pretrained / checkpoint / dữ liệu công khai lớn: tải NGAY TRÊN
+  KAGGLE (`model_sources`, `labrat kaggle-fetch`, `parent_outputs`), không qua VPS — `docs/agent/gpu-kaggle.md`.
 
 ## Mục tiêu và thứ tự ưu tiên
 
@@ -101,9 +102,11 @@ rồi `python -m labrat report <slug> --send` và trả lời ngắn kết quả
 - Câu trả lời cuối = tin nhắn Telegram: tiếng Việt, ngắn, có số liệu, văn bản thường (Telegram không hiện bảng
   Markdown). Không kể lể từng bước.
 - `poll`/`wait`/`tick` tự báo khi kernel xong — đừng lặp lại. Tin chủ động khác: `labrat notify`.
-- Lượt nguồn `cron` = có thí nghiệm vừa xong hoặc tài khoản GPU rảnh: thu kết quả, phân tích, đẩy thí nghiệm tiếp nếu
-  còn ngân sách và dự án không `paused`, trả lời 1–3 dòng (không có gì làm → rất ngắn).
-- Bridge tự xử lý `/status /accounts /usage /new /stop /resume /dropbox /scan /get /cancel` và tự tải link dữ liệu.
+- Lượt nguồn `cron` = có thí nghiệm vừa xong, tài khoản GPU rảnh, hoặc PHIÊN LÀM VIỆC ĐỊNH KỲ (mỗi giờ): thu kết quả,
+  phân tích, đẩy thí nghiệm tiếp nếu còn ngân sách và dự án không `paused`; GPU bận thì phân tích lỗi / đọc tài liệu /
+  chuẩn bị thí nghiệm kế tiếp. Trả lời 1–3 dòng; không có gì đáng báo → bắt đầu bằng `[im lặng]` (không gửi Telegram).
+- Giờ GPU có vẻ sai / kernel bị từ chối vì hết quota → nhờ người dùng gửi `/quota <tk> <giờ đã dùng trên kaggle.com>`.
+- Bridge tự xử lý `/status /accounts /quota /usage /new /stop /resume /dropbox /scan /get /cancel` và tự tải link dữ liệu.
 - "ngân sách N giờ" → sửa `budget.project_gpu_hours` trong `project.yaml`; "thử <ý tưởng>" → đưa lên đầu `plan.md`.
 
 ## Tài liệu chi tiết — đọc khi cần
@@ -111,6 +114,6 @@ rồi `python -m labrat report <slug> --send` và trả lời ngắn kết quả
 | Khi | Đọc |
 |---|---|
 | Lập kế hoạch, chọn giả thuyết, dùng `--quick` / `report-seeds`, dự án có `_archive/` | `docs/agent/nghien-cuu.md` |
-| Viết `job.yaml` / script, dùng 2 GPU, nhiều tài khoản, bố cục thư mục, biến môi trường | `docs/agent/gpu-kaggle.md` |
+| Viết `job.yaml` / script, dùng 2 GPU, nhiều tài khoản, giờ GPU, tải mô hình/dữ liệu trên Kaggle, checkpoint của cha | `docs/agent/gpu-kaggle.md` |
 | Cuộc thi ngoài Kaggle, paper, dữ liệu người dùng gửi | `docs/agent/quy-trinh.md` |
 | Gọi LLM qua OpenRouter (zero/few-shot, tăng cường, dịch, gán nhãn), đọc ảnh / PDF scan | `docs/agent/llm.md` |

@@ -34,6 +34,7 @@ MAX_FILE = 20 * 1024 * 1024
 HELP = """Lệnh nhanh:
 /status — tình hình mọi dự án
 /accounts — quota & kernel từng tài khoản Kaggle
+/quota [tk giờ] — hiệu chỉnh giờ GPU đã dùng theo số trên kaggle.com
 /new — bắt đầu phiên agent mới (quên ngữ cảnh cũ; lượt sau sẽ cache miss một lần)
 /usage — token, cache hit 24h và chi tiêu OpenRouter
 /stop <slug> — tạm dừng dự án (không đẩy thí nghiệm mới)
@@ -137,8 +138,31 @@ def quick_status() -> str:
 
 def quick_accounts() -> str:
     rows = budget.accounts_status(load_config())
-    return "\n".join(f"• {r['name']} ({r['username']}): {r['week_used']:.1f}/{r['weekly_gpu_hours']:.0f}h tuần · "
-                     f"{'GPU: ' + r['gpu_busy'] if r['gpu_busy'] else 'rảnh'}" for r in rows)
+    def line(r):
+        extra = []
+        if r.get("calibrated"):
+            extra.append(f"hiệu chỉnh {r['calibrated']['used']}h lúc {r['calibrated']['at'][5:16].replace('T', ' ')} UTC")
+        if r.get("other_bots_h"):
+            extra.append(f"bot khác {r['other_bots_h']:.1f}h")
+        return (f"• {r['name']} ({r['username']}): {r['week_used']:.1f}/{r['weekly_gpu_hours']:.0f}h tuần · "
+                f"{'GPU: ' + r['gpu_busy'] if r['gpu_busy'] else 'rảnh'}" + (f" ({'; '.join(extra)})" if extra else ""))
+    return "\n".join(line(r) for r in rows)
+
+
+def quick_quota(parts: list[str]) -> str:
+    """/quota → bảng; /quota <tk> <giờ đã dùng> → hiệu chỉnh theo số trên kaggle.com."""
+    cfg = load_config()
+    if len(parts) >= 3:
+        from .accounts import get_account
+        try:
+            acc = get_account(cfg, parts[1])
+            used = float(parts[2].replace(",", ".").rstrip("h"))
+        except (SystemExit, ValueError) as e:
+            return f"⚠️ {e}. Cú pháp: /quota <tài khoản> <giờ ĐÃ DÙNG> — vd /quota acc1 12.5"
+        budget.set_calibration(acc.username, used)
+        return f"✅ {acc.name}: đặt {used}h đã dùng (theo kaggle.com). Từ giờ cộng thêm các lần chạy mới.\n" + quick_accounts()
+    return (quick_accounts() + "\n\nSố trên kaggle.com khác? Mở kaggle.com → Settings (mục Quota) ở từng tài khoản, "
+            "rồi gửi /quota <tài khoản> <giờ đã dùng>.")
 
 
 def set_paused(slug: str, paused: bool) -> str:
@@ -186,6 +210,8 @@ def handle_quick(text: str) -> str | None:
         return quick_status()
     if cmd == "/accounts":
         return quick_accounts()
+    if cmd == "/quota":
+        return quick_quota(parts)
     if cmd == "/usage":
         return _usage_text()
     if cmd == "/usage_harness":
@@ -342,8 +368,11 @@ def worker(tg: Telegram, q: "queue.Queue[dict]", busy: threading.Event):
         try:
             res = agent.run_agent(item["prompt"], source=item["source"])
             prefix = "🤖 " if item["source"] == "cron" else ""
-            if res["reply"]:
-                tg.send(prefix + res["reply"])
+            reply = (res["reply"] or "").strip()
+            if item["source"] == "cron" and reply.lower().startswith("[im lặng]"):
+                print(f"[cron] im lặng: {reply[:200]}", flush=True)
+            elif reply:
+                tg.send(prefix + reply)
         except Exception:
             tg.send("⚠️ Lỗi khi gọi agent:\n" + traceback.format_exc()[-1500:])
         finally:

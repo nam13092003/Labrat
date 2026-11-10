@@ -124,13 +124,30 @@ def _choose_account(cfg: dict, est: float, *, smoke: bool, account: str | None, 
     return get_account(cfg, pick["name"])
 
 
+def parent_source(cfg: dict, reg: Registry, exp: dict) -> tuple[str, str] | None:
+    """job.yaml `parent_outputs: true` → (tài khoản, kernel_ref) của lần chạy đầy đủ của thí nghiệm cha.
+
+    Output kernel riêng tư chỉ tài khoản sở hữu đọc được → thí nghiệm con PHẢI chạy trên đúng tài khoản đó.
+    """
+    jf = exp_path(cfg, exp) / "job.yaml"
+    job = yaml.safe_load(jf.read_text(encoding="utf-8")) if jf.exists() else {}
+    if not (job or {}).get("parent_outputs"):
+        return None
+    if not exp.get("parent"):
+        raise SystemExit(f"{exp['id']}: parent_outputs cần thí nghiệm cha (new-exp --parent).")
+    main = _main_run(reg.get(exp["parent"]))
+    if not main:
+        raise SystemExit(f"{exp['parent']} chưa có lần chạy đầy đủ thành công để lấy checkpoint.")
+    return main["account"], main["kernel_ref"]
+
+
 def _launch(cfg: dict, exp: dict, acc, *, smoke: bool, est: float, fidelity: str = "full",
-            seed: int | None = None) -> dict:
+            seed: int | None = None, extra_sources: list[str] | None = None) -> dict:
     k = cfg.get("kaggle", {})
     quick = fidelity == "quick"
     seed = seed if seed is not None else int(cfg.get("research", {}).get("base_seed", 42))
     folder, ref = build_bundle(exp_path(cfg, exp), cfg=cfg, exp=exp, username=acc.username, smoke=smoke,
-                               quick=quick, seed=seed)
+                               quick=quick, seed=seed, extra_kernel_sources=extra_sources)
     accel = None if smoke else k.get("accelerator", "NvidiaTeslaT4")
     max_h = float(k.get("quick_max_hours", 1.5)) if quick else float(k.get("max_runtime_hours", 9))
     timeout_s = 3600 if smoke else max_h * 3600
@@ -241,10 +258,16 @@ def push(cfg: dict, exp_id: str, *, smoke: bool, quick: bool = False, force: boo
 
     if not smoke:
         check_ready(cfg, reg, exp)
+    ps = parent_source(cfg, reg, exp)
+    if ps:
+        if account and get_account(cfg, account).name != ps[0]:
+            raise SystemExit(f"{exp_id} dùng output của {exp['parent']} (tài khoản {ps[0]}) → phải chạy trên {ps[0]}.")
+        account = ps[0]
     acc = _choose_account(cfg, est, smoke=smoke, account=account, force=force)
     announced = False if smoke else announce(cfg, reg, exp, level="quick" if quick else "full", account=acc.name,
                                               est=round(est, 2))
-    run = _launch(cfg, exp, acc, smoke=smoke, est=est, fidelity="quick" if quick else "full")
+    run = _launch(cfg, exp, acc, smoke=smoke, est=est, fidelity="quick" if quick else "full",
+                  extra_sources=[ps[1]] if ps else None)
     run["announced"] = announced
     exp["status"] = "smoke_running" if smoke else "running"
     reg.save()
@@ -297,6 +320,7 @@ def report_seeds(cfg: dict, exp_id: str, n: int | None = None, *, est_hours: flo
     todo = [s for s in seeds[1:] if s not in have]
     est = est_hours or main.get("gpu_hours") or budget.typical_run_hours(reg)
     pushed, waiting = [], []
+    ps = parent_source(cfg, reg, exp)
     if todo:
         announce(cfg, reg, exp, level="report", account=None, est=round(est, 2), seeds=seeds)
     for s in todo:
@@ -304,10 +328,11 @@ def report_seeds(cfg: dict, exp_id: str, n: int | None = None, *, est_hours: flo
         if (chk["stop"] or chk["pause_until_reset"]) and not force:
             waiting.append(s); continue
         try:
-            acc = _choose_account(cfg, est, smoke=False, account=None, force=False)
+            acc = _choose_account(cfg, est, smoke=False, account=ps[0] if ps else None, force=False)
         except SystemExit:
             waiting.append(s); continue
-        run = _launch(cfg, exp, acc, smoke=False, est=est, fidelity="report", seed=s)
+        run = _launch(cfg, exp, acc, smoke=False, est=est, fidelity="report", seed=s,
+                      extra_sources=[ps[1]] if ps else None)
         exp["status"] = "reporting"
         reg.save()
         pushed.append({"seed": s, "account": acc.name, "kernel_ref": run["kernel_ref"]})
@@ -353,7 +378,7 @@ def fetch_pattern(cfg: dict, exp: dict) -> str:
 
 
 def _apply_metrics(cfg: dict, exp: dict, run: dict, m: dict) -> None:
-    overhead = float(cfg.get("budget", {}).get("startup_overhead_hours", 0.05))
+    overhead = float(cfg.get("budget", {}).get("startup_overhead_hours", 0.1))
     run["wall_seconds"] = m.get("wall_seconds")
     run["n_gpu"] = m.get("n_gpu")
     run["gpu_util"] = m.get("gpu_util")

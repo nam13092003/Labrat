@@ -18,6 +18,14 @@
 - Với mỗi cuộc thi, MỌI tài khoản phải chấp nhận luật trên web. `labrat fetch <slug>` báo tài khoản nào chưa —
   nhắn người dùng ngay nếu có.
 
+## Giờ GPU còn lại
+
+Kaggle KHÔNG có API trả quota. `labrat accounts` tự cộng thời gian phiên của mọi lần chạy (cả các bot Labrat khác trên
+cùng máy dùng chung tài khoản) + `startup_overhead_hours` mỗi lần. Số này lệch so với kaggle.com khi có phiên ngoài
+Labrat (notebook mở tay, công cụ khác) hoặc thời gian khởi động/lưu output dài. Khi kernel bị Kaggle từ chối vì hết quota,
+hoặc số liệu có vẻ sai: nhờ người dùng đọc kaggle.com → Settings (mục Quota) và gửi `/quota <tài khoản> <giờ đã dùng>`
+(hoặc tự chạy `labrat quota <tk> --used H` nếu người dùng nhắn số). Từ lúc đó giờ đã dùng = số trên web + các lần chạy sau.
+
 ## Tận dụng 2 GPU T4 trong mỗi phiên
 
 Quota tính theo **thời gian phiên**, không theo số GPU. Một phiên T4 x2 trống một GPU = phí nửa ngân sách.
@@ -32,6 +40,23 @@ Quota tính theo **thời gian phiên**, không theo số GPU. Một phiên T4 x
 Phần cứng T4: fp16 (không bf16), không FlashAttention-2 (dùng SDPA), ~15 GB/GPU, ~4 nhân CPU cho cả phiên
 (2 job song song → `n_jobs=2`, `num_workers=2` mỗi job). Sau mỗi lần chạy xem `gpu_util`: GPU < 40% là lãng phí;
 `n_gpu < 2` → báo người dùng.
+
+## Mô hình / dữ liệu nặng: tải trên Kaggle, không qua VPS
+
+VPS chật — đừng tải pretrained / checkpoint / dữ liệu công khai lớn về VPS rồi upload. Theo thứ tự ưu tiên:
+1. **Có sẵn trên Kaggle** (Kaggle Models, dataset công khai): khai báo trong job.yaml `model_sources: ["owner/model/framework/variation/version"]`
+   hoặc `dataset_sources: ["owner/dataset"]` — gắn thẳng vào kernel.
+2. **Nguồn công khai bên ngoài** (Hugging Face, link trực tiếp): `labrat kaggle-fetch <slug> <tên> --hf <repo> [--include "*.safetensors"]`
+   hoặc `--url <link>` / `--cmd "<lệnh tải>"`. Một kernel CPU trên mỗi tài khoản tải về (không tốn quota GPU, ≤ 20 GB),
+   output được giữ lại. Chờ `labrat kaggle-fetch-status <slug> <tên>` → ready, rồi job.yaml `fetched: [<tên>]`;
+   file ở `/kaggle/input/<tiêu-đề>/<tên>/` (`find_input`). Không đưa token (HF...) vào kernel: chỉ nguồn công khai.
+3. **Nhỏ, dùng một lần**: tải ngay trong kernel thí nghiệm (internet bật) vào `$LABRAT_SCRATCH` — tốn vài phút GPU mỗi lần.
+
+**Dùng tiếp checkpoint của thí nghiệm cha** (fine-tune tiếp, phân tích lỗi trên mô hình đã huấn luyện) mà không tải về VPS:
+thí nghiệm cha giữ file bằng `keep_outputs: ["outputs/best_model.pt"]`; thí nghiệm con (`--parent`) đặt
+`parent_outputs: true` trong job.yaml → kernel con gắn output kernel cha (`/kaggle/input/<kernel-cha>/`) và tự chạy trên
+ĐÚNG tài khoản của cha (output riêng tư chỉ tài khoản đó đọc được; tài khoản bận thì chờ). Nguồn là phiên bản MỚI NHẤT
+của kernel cha — đừng chạy lại kernel cha (report-seeds, push lại) khi con còn cần checkpoint cũ.
 
 ## Bố cục thư mục
 

@@ -167,6 +167,18 @@ Sổ tay agent gồm `AGENT.md` (luật chung, < 200 dòng, nạp mỗi lượt)
 - **Chốt kết quả.** `labrat report-seeds <slug> <exp> --n 3`: chạy lại cấu hình đã chốt với nhiều seed (mỗi seed một
   tài khoản), báo cáo mean ± std của TẤT CẢ seed; chặn nếu code đã đổi; tối đa 6 thí nghiệm. Fold luôn cố định.
 
+## Giờ GPU, phiên định kỳ, tải trên Kaggle
+
+- **Giờ GPU.** Kaggle không có API quota. Labrat tự cộng thời gian phiên theo username Kaggle, gồm cả các bot Labrat
+  khác trên cùng máy (`~/Labrat*`) dùng chung tài khoản. Lệch so với kaggle.com (Settings → Quota) → hiệu chỉnh:
+  Telegram `/quota <tài khoản> <giờ đã dùng>` hoặc `labrat quota <tk> --used H` (lưu ở `~/.labrat_quota.json`, dùng chung
+  mọi bot; tự hết hiệu lực khi quota reset thứ Bảy).
+- **Phiên làm việc định kỳ.** Cron `tick_all.py` đánh thức mỗi dự án đang hoạt động tối thiểu mỗi `autowork.minutes`
+  (mặc định 60) để agent tự nghiên cứu tiếp, kể cả khi GPU đều bận. Không có gì đáng báo thì không gửi Telegram.
+- **Tải trên Kaggle, không qua VPS.** `model_sources` / `dataset_sources` trong job.yaml cho tài nguyên có sẵn trên Kaggle;
+  `labrat kaggle-fetch <slug> <tên> --hf <repo> | --url <link> | --cmd "<lệnh>"` tải nguồn công khai bằng kernel CPU trên
+  mỗi tài khoản, rồi job.yaml `fetched: [<tên>]`; `parent_outputs: true` để thí nghiệm con dùng checkpoint của cha.
+
 ## Chi phí LLM và cache
 
 DeepSeek tự động cache **tiền tố** của request, khớp từ đầu. Cache hit được tính giá rẻ hơn nhiều, nên hệ thống được

@@ -50,7 +50,7 @@ import time
 import yaml
 
 from . import budget, data, dropbox, experiments, kaggle_ops, papers, report, research, telegram
-from .accounts import load_accounts
+from .accounts import get_account, load_accounts
 from .config import comp_dir, load_config
 
 
@@ -136,6 +136,30 @@ def cmd_fetch(a):
     if a.download:
         res["download"] = kaggle_ops.competition_download(acc, a.slug, d / "data")
     out(res)
+
+
+def cmd_kaggle_fetch(a):
+    from . import kfetch
+    cfg = load_config(a.slug)
+    out(kfetch.create(cfg, a.name, hf=a.hf, repo_type=a.repo_type, include=a.include, urls=a.url, cmd=a.cmd,
+                      accounts=a.account))
+
+
+def cmd_kaggle_fetch_status(a):
+    from . import kfetch
+    out(kfetch.status(load_config(a.slug), a.name))
+
+
+def cmd_quota(a):
+    cfg = load_config()
+    if a.account:
+        acc = get_account(cfg, a.account)
+        if (a.used is None) == (a.left is None):
+            raise SystemExit("Cần đúng một trong --used H (giờ ĐÃ DÙNG trên kaggle.com) hoặc --left H (giờ CÒN LẠI).")
+        used = a.used if a.used is not None else acc.weekly_gpu_hours - a.left
+        budget.set_calibration(acc.username, used)
+    out([{k: r.get(k) for k in ("name", "username", "week_used", "weekly_gpu_hours", "week_left", "other_bots_h",
+                                "calibrated", "gpu_busy")} for r in budget.accounts_status(cfg)])
 
 
 def cmd_accounts(a):
@@ -413,6 +437,18 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--metric"); s.add_argument("--title"); s.add_argument("--gpu-hours", type=float, default=20)
     s = add("fetch", cmd_fetch, "slug"); s.add_argument("--download", action="store_true")
     s = add("accounts", cmd_accounts); s.add_argument("--check", action="store_true")
+    s = add("kaggle-fetch", cmd_kaggle_fetch, "slug", "name")
+    s.add_argument("--hf", help="repo Hugging Face công khai, vd microsoft/deberta-v3-large")
+    s.add_argument("--repo-type", default="model", choices=["model", "dataset"])
+    s.add_argument("--include", action="append", help="mẫu file cần tải (vd '*.safetensors'), lặp được")
+    s.add_argument("--url", action="append", help="link tải trực tiếp, lặp được")
+    s.add_argument("--cmd", help="lệnh shell tải về thư mục hiện tại")
+    s.add_argument("--account", action="append", help="chỉ tải lên các tài khoản này (mặc định: tất cả)")
+    s = add("kaggle-fetch-status", cmd_kaggle_fetch_status, "slug"); s.add_argument("name", nargs="?")
+    s = add("quota", cmd_quota)
+    s.add_argument("account", nargs="?", help="tên/username tài khoản để hiệu chỉnh theo số trên kaggle.com")
+    s.add_argument("--used", type=float, help="giờ GPU ĐÃ DÙNG tuần này (đọc ở kaggle.com → Settings / Quota)")
+    s.add_argument("--left", type=float, help="hoặc giờ CÒN LẠI")
     s = add("research", cmd_research, "slug", "query"); s.add_argument("--limit", type=int, default=10)
     s = add("lit-add", cmd_lit_add, "slug")
     s.add_argument("--title", required=True); s.add_argument("--url", required=True)

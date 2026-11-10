@@ -1,7 +1,11 @@
 """Ngân sách GPU (theo từng tài khoản Kaggle) và điều kiện dừng.
 
 - Quota tuần: RIÊNG cho từng tài khoản (mặc định 30h), reset 00:00 UTC thứ Bảy.
-  Kaggle không có API trả quota còn lại → ta tự cộng dồn thời gian phiên GPU của mọi dự án.
+  Kaggle không có API trả quota còn lại → ta tự cộng dồn thời gian phiên GPU, theo USERNAME Kaggle, trên:
+    * mọi dự án của bot này, và
+    * mọi bot Labrat khác trên cùng máy (thư mục anh em có competitions/ — bot dùng chung tài khoản), và
+    * hiệu chỉnh bằng số liệu thật đọc trên kaggle.com/me (`labrat quota <tk> --used H`, lưu ở ~/.labrat_quota.json,
+      dùng chung mọi bot): từ thời điểm hiệu chỉnh, giờ đã dùng = số đọc trên web + các lần chạy đẩy sau đó.
 - Trần dự án: TỔNG giờ GPU một dự án được tiêu trên mọi tài khoản.
 - Mỗi tài khoản chỉ chạy 1 kernel GPU cùng lúc → N tài khoản = N thí nghiệm song song.
 - Kernel đang chạy được tính là max(thời gian đã chạy, ước tính lúc đẩy) để không cam kết quá ngân sách.
@@ -10,11 +14,14 @@ Quota tính theo thời gian phiên, KHÔNG theo số GPU: một phiên T4 x2 ch
 """
 from __future__ import annotations
 
+import json
+import os
 import statistics
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from .accounts import load_accounts, run_account
-from .config import competitions_root
+from .config import ROOT, competitions_root
 from .registry import ACTIVE, Registry, better, parse_iso
 
 
@@ -42,6 +49,52 @@ def run_gpu_hours(run: dict, overhead: float, now: datetime | None = None) -> fl
     return 0.0
 
 
+def quota_file() -> Path:
+    return Path(os.environ.get("LABRAT_QUOTA_FILE", Path.home() / ".labrat_quota.json"))
+
+
+def load_calibration() -> dict:
+    try:
+        return json.loads(quota_file().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def set_calibration(username: str, used_hours: float, source: str = "kaggle.com/me") -> dict:
+    cal = load_calibration()
+    cal[username] = {"used": round(float(used_hours), 2), "at": datetime.now(timezone.utc).isoformat(),
+                     "source": source}
+    f = quota_file()
+    f.write_text(json.dumps(cal, indent=2), encoding="utf-8")
+    try:
+        f.chmod(0o600)
+    except OSError:
+        pass
+    return cal[username]
+
+
+def sibling_roots(cfg: dict) -> list[Path]:
+    """Thư mục competitions/ của các bot Labrat khác trên cùng máy (dùng chung tài khoản Kaggle)."""
+    b = cfg.get("budget", {}) or {}
+    if b.get("quota_scan_roots") is not None:
+        return [Path(os.path.expanduser(str(x))) for x in b["quota_scan_roots"]]
+    if os.environ.get("LABRAT_NO_SIBLINGS"):
+        return []
+    out, me = [], ROOT.resolve()
+    try:
+        for d in sorted(ROOT.parent.iterdir()):
+            if d.is_dir() and d.resolve() != me and (d / "competitions").is_dir() and (d / "labrat").is_dir():
+                out.append(d / "competitions")
+    except OSError:
+        pass
+    return out
+
+
+def run_username(run: dict) -> str | None:
+    ref = run.get("kernel_ref") or ""
+    return ref.split("/")[0] if "/" in ref else None
+
+
 def all_projects_runs(cfg: dict) -> list[tuple[str, dict, dict]]:
     """[(slug, experiment, run)] của mọi dự án."""
     out = []
@@ -54,28 +107,60 @@ def all_projects_runs(cfg: dict) -> list[tuple[str, dict, dict]]:
     return out
 
 
+def other_bots_runs(cfg: dict) -> list[tuple[str, dict, dict]]:
+    out = []
+    for root in sibling_roots(cfg):
+        for reg_path in root.glob("*/registry.json"):
+            try:
+                exps = Registry(reg_path).experiments
+            except Exception:
+                continue
+            for e in exps:
+                for r in e.get("runs", []):
+                    out.append((f"{root.parent.name}:{reg_path.parent.name}", e, r))
+    return out
+
+
 def accounts_status(cfg: dict) -> list[dict]:
     b = cfg.get("budget", {})
-    overhead = float(b.get("startup_overhead_hours", 0.05))
+    overhead = float(b.get("startup_overhead_hours", 0.1))
     reserve = float(b.get("reserve_hours", 1.0))
     now = datetime.now(timezone.utc)
     week_start = kaggle_week_start(now)
     accs = load_accounts(cfg)
-    rows = {a.name: {**a.public(), "week_used": 0.0, "gpu_busy": None, "cpu_busy": 0} for a in accs}
-    for slug, e, r in all_projects_runs(cfg):
-        name = run_account(r, accs)
+    by_user = {a.username: a.name for a in accs}
+    cal = load_calibration()
+    rows = {a.name: {**a.public(), "week_used": 0.0, "gpu_busy": None, "cpu_busy": 0, "other_bots_h": 0.0}
+            for a in accs}
+    cal_at = {}
+    for a in accs:
+        c = cal.get(a.username)
+        t = parse_iso(c.get("at")) if c else None
+        if t and t >= week_start:
+            cal_at[a.name] = t
+            rows[a.name]["week_used"] = float(c["used"])
+            rows[a.name]["calibrated"] = {"used": c["used"], "at": c["at"]}
+    sources = [(s, e, r, False) for s, e, r in all_projects_runs(cfg)] + \
+              [(s, e, r, True) for s, e, r in other_bots_runs(cfg)]
+    for slug, e, r, other in sources:
+        user = run_username(r)
+        name = by_user.get(user) if user else (None if other else run_account(r, accs))
         if name not in rows:
             continue
         t = parse_iso(r.get("pushed_at"))
-        if t and t >= week_start:
-            rows[name]["week_used"] += run_gpu_hours(r, overhead, now)
+        if t and t >= week_start and (name not in cal_at or t > cal_at[name]):
+            h = run_gpu_hours(r, overhead, now)
+            rows[name]["week_used"] += h
+            if other:
+                rows[name]["other_bots_h"] += h
         if not r.get("finished_at") and e.get("status") in ACTIVE:
             if r.get("kind") == "gpu":
                 rows[name]["gpu_busy"] = f"{slug}/{e['id']}"
-            else:
+            elif not other:
                 rows[name]["cpu_busy"] += 1
     for row in rows.values():
         row["week_used"] = round(row["week_used"], 2)
+        row["other_bots_h"] = round(row["other_bots_h"], 2)
         row["week_left"] = round(max(0.0, row["weekly_gpu_hours"] - row["week_used"] - reserve), 2)
     return list(rows.values())
 
@@ -90,7 +175,7 @@ def pick_account(cfg: dict, est_hours: float, gpu: bool = True) -> dict | None:
 
 def summary(cfg: dict, reg: Registry) -> dict:
     b = cfg.get("budget", {})
-    overhead = float(b.get("startup_overhead_hours", 0.05))
+    overhead = float(b.get("startup_overhead_hours", 0.1))
     accs = accounts_status(cfg)
     project_used = sum(run_gpu_hours(r, overhead) for r in reg.all_runs())
     project_cap = float(b.get("project_gpu_hours", 20))

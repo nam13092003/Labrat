@@ -35,6 +35,8 @@ os.environ.update(FAKE)
 for k in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"):
     os.environ.pop(k, None)
 os.environ["TELEGRAM_BOT_TOKEN"] = ""  # chặn load_env điền từ .env thật
+os.environ["LABRAT_NO_SIBLINGS"] = "1"  # không cộng giờ của bot thật trên cùng máy
+os.environ["LABRAT_QUOTA_FILE"] = str(Path(tempfile.mkdtemp()) / "quota.json")
 
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
@@ -871,6 +873,109 @@ def _tests(data_dir: Path):
         check(m2["ok"] and m2["cv"] is not None, f"torch smoke cv={m2['cv']}")
     except ImportError:
         print("  - bỏ qua (không có torch)")
+
+    print("10) giờ GPU (hiệu chỉnh, bot dùng chung), phiên định kỳ, tải trên Kaggle, checkpoint của cha")
+    cfg = load_config(SLUG)
+    now_utc = datetime.now(timezone.utc)
+    budget.set_calibration("user1", 20.0)
+    a1 = next(r for r in budget.accounts_status(cfg) if r["name"] == "a1")
+    reserve = float(cfg["budget"].get("reserve_hours", 1.0))
+    check(abs(a1["week_used"] - 20.0) < 1e-6 and abs(a1["week_left"] - (a1["weekly_gpu_hours"] - 20 - reserve)) < 1e-6,
+          f"hiệu chỉnh theo kaggle.com: a1 = 20h đã dùng (các lần chạy trước mốc hiệu chỉnh không cộng thêm)")
+    calf = Path(os.environ["LABRAT_QUOTA_FILE"])
+    cal = json.loads(calf.read_text())
+    cal["user1"]["at"] = (budget.kaggle_week_start() - timedelta(days=1)).isoformat()
+    calf.write_text(json.dumps(cal))
+    a1b = next(r for r in budget.accounts_status(cfg) if r["name"] == "a1")
+    check(not a1b.get("calibrated"), "hiệu chỉnh từ tuần trước bị bỏ qua (quota đã reset)")
+    check("✅" in bridge.handle_quick("/quota a1 7.5") and json.loads(calf.read_text())["user1"]["used"] == 7.5,
+          "/quota a1 7.5 trên Telegram ghi hiệu chỉnh")
+    check("Không có tài khoản" in bridge.handle_quick("/quota zz 3"), "/quota tài khoản sai → báo lỗi, không crash")
+    calf.unlink()
+
+    other = Path(tempfile.mkdtemp()) / "Labrat9" / "competitions"
+    (other / "p").mkdir(parents=True)
+    t_now = now_utc.isoformat()
+    (other / "p" / "registry.json").write_text(json.dumps({"experiments": [
+        {"id": "exp-001", "status": "complete", "runs": [
+            {"kind": "gpu", "account": "x", "kernel_ref": "user2/k1", "pushed_at": t_now, "finished_at": t_now,
+             "gpu_hours": 3.0}]},
+        {"id": "exp-002", "status": "running", "runs": [
+            {"kind": "gpu", "account": "y", "kernel_ref": "user3/k2", "pushed_at": t_now, "est_hours": 2.0}]},
+        {"id": "exp-003", "status": "complete", "runs": [
+            {"kind": "gpu", "account": "z", "kernel_ref": "stranger/k3", "pushed_at": t_now, "finished_at": t_now,
+             "gpu_hours": 9.0}]}]}))
+    cfgS = dict(cfg, budget=dict(cfg["budget"], quota_scan_roots=[str(other)]))
+    rows = {r["name"]: r for r in budget.accounts_status(cfgS)}
+    base_rows = {r["name"]: r for r in budget.accounts_status(cfg)}
+    check(abs(rows["a2"]["other_bots_h"] - 3.0) < 1e-6
+          and abs(rows["a2"]["week_used"] - base_rows["a2"]["week_used"] - 3.0) < 1e-6,
+          "giờ của bot khác dùng chung tài khoản (theo username) được cộng vào")
+    check(rows["a3"]["gpu_busy"] and "Labrat9" in rows["a3"]["gpu_busy"],
+          f"kernel GPU đang chạy của bot khác → tài khoản bận: {rows['a3']['gpu_busy']}")
+    check(sum(r["other_bots_h"] for r in rows.values()) < 6, "tài khoản lạ (username khác) không bị tính")
+
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("tick_all", ROOT / "scripts" / "tick_all.py")
+    tick = importlib.util.module_from_spec(spec); spec.loader.exec_module(tick)
+    base = {"autowork": {"minutes": 60}}
+    nowt = time.time()
+    check(tick.autowork_due(base, cfg, "p", {}, None, set(), nowt), "phiên định kỳ: lần đầu → đánh thức")
+    check(not tick.autowork_due(base, cfg, "p", {"p": nowt - 600}, None, set(), nowt), "vừa có sự kiện 10 phút trước → chưa")
+    check(tick.autowork_due(base, cfg, "p", {"auto:p": nowt - 3700}, None, set(), nowt), "đã > 60 phút → đánh thức")
+    check(not tick.autowork_due(base, dict(cfg, paused=True), "p", {}, None, set(), nowt), "dự án tạm dừng → không")
+    check(not tick.autowork_due(base, cfg, "p", {}, None, {"p"}, nowt), "đã có lượt chờ trong hàng đợi → không chồng thêm")
+    check(not tick.autowork_due(base, cfg, "p", {}, {"stop": True}, set(), nowt), "hết ngân sách / dừng → không")
+    check(not tick.autowork_due({"autowork": {"minutes": 0}}, cfg, "p", {}, None, set(), nowt), "minutes: 0 → tắt")
+    check("[im lặng]" in tick.autowork_message("p", None), "lời nhắc định kỳ cho phép trả lời im lặng")
+
+    from labrat import kfetch
+    compile(kfetch._script("deb", "microsoft/deberta-v3-base", "model", ["*.json"], ["https://x/y.bin"], "echo hi"),
+            "fetch.py", "exec")
+    n_push = len(pushed)
+    kf = kfetch.create(cfg, "deberta", hf="microsoft/deberta-v3-base", include=["*.safetensors"])
+    metas = [m for _, _, m in pushed[n_push:]]
+    check(len(metas) == 3 and all(not m["enable_gpu"] and m["enable_internet"] for m in metas)
+          and {m["id"].split("/")[0] for m in metas} == {"user1", "user2", "user3"},
+          "kaggle-fetch: một kernel CPU có internet trên MỖI tài khoản (không tốn quota GPU)")
+    check(not list((ROOT / ".labrat_tmp").glob("kfetch-*")), "không để lại thư mục tạm trên VPS")
+    cfg = load_config(SLUG)
+    st = kfetch.status(cfg, "deberta")
+    check(st["deberta"]["ready"], "kaggle-fetch-status: complete trên mọi tài khoản → ready")
+    cfg = load_config(SLUG)
+    ex = experiments.registry_for(cfg).get(ids[2])
+    jf = experiments.exp_path(cfg, ex) / "job.yaml"
+    orig = jf.read_text()
+    jd = yaml.safe_load(orig); jd["fetched"] = ["deberta"]; jf.write_text(yaml.safe_dump(jd))
+    bd, _ = build_bundle(experiments.exp_path(cfg, ex), cfg=cfg, exp=ex, username="user2", smoke=False)
+    ks = json.loads((bd / "kernel-metadata.json").read_text())["kernel_sources"]
+    check(ks == [f"user2/{kf['title']}"], f"job.yaml fetched → kernel_sources đúng tài khoản: {ks}")
+    jd["fetched"] = ["chua-tai"]; jf.write_text(yaml.safe_dump(jd))
+    try:
+        build_bundle(experiments.exp_path(cfg, ex), cfg=cfg, exp=ex, username="user2", smoke=False)
+        check(False, "fetched chưa tải phải báo lỗi")
+    except SystemExit as e:
+        check("kaggle-fetch" in str(e), "fetched chưa tải → báo lỗi kèm lệnh cần chạy")
+    jf.write_text(orig)
+
+    par = experiments.registry_for(cfg).get(ids[1])
+    pmain = experiments._main_run(par)
+    child = experiments.new_experiment(cfg, name="finetune-tiep", hypothesis="huấn luyện tiếp từ checkpoint của cha",
+                                       parent=ids[1], evidence="learning curve exp cha chưa bão hoà ở epoch cuối")
+    cjf = experiments.exp_path(cfg, child) / "job.yaml"
+    cj = yaml.safe_load(cjf.read_text()); cj["parent_outputs"] = True; cjf.write_text(yaml.safe_dump(cj))
+    fill_notes(child["id"], 7)
+    rg = experiments.registry_for(cfg); rg.get(child["id"])["status"] = "smoke_ok"; rg.save()
+    other_acc = next(a for a in ("a1", "a2", "a3") if a != pmain["account"])
+    try:
+        experiments.push(cfg2, child["id"], smoke=False, account=other_acc, est_hours=1.0)
+        check(False, "chạy con trên tài khoản khác cha phải bị chặn")
+    except SystemExit as e:
+        check(pmain["account"] in str(e), "parent_outputs: tài khoản khác cha → bị chặn")
+    oc = experiments.push(cfg2, child["id"], smoke=False, est_hours=1.0, force=True)
+    meta = pushed[-1][2]
+    check(oc["account"] == pmain["account"] and pmain["kernel_ref"] in meta["kernel_sources"],
+          f"parent_outputs: tự chạy trên tài khoản của cha ({oc['account']}), gắn output kernel cha")
 
 
 if __name__ == "__main__":

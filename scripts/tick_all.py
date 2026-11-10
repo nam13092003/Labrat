@@ -6,6 +6,10 @@
     (phòng khi agent quên đẩy thí nghiệm tiếp theo).
 Mặc định "đánh thức" = thả vào .wake_queue/ để bridge Telegram gọi agent và gửi trả lời.
 Có thể thay bằng lệnh riêng qua biến LABRAT_WAKE_CMD (thông điệp ở biến LABRAT_WAKE_MSG).
+Ngoài ra, PHIÊN LÀM VIỆC ĐỊNH KỲ (config `autowork.minutes`, mặc định 60): mỗi dự án đang hoạt động (chưa tạm dừng,
+chưa hết ngân sách) được đánh thức tối thiểu mỗi N phút để tự tiếp tục nghiên cứu — kể cả khi mọi GPU đang bận
+(dùng thời gian cho phân tích lỗi, đọc tài liệu, chuẩn bị thí nghiệm kế tiếp). Không có gì đáng báo → agent trả lời
+bắt đầu bằng "[im lặng]" và bridge không gửi Telegram.
 Cũng quét thư mục dropbox: dữ liệu mới/cập nhật đã chép xong → báo Telegram + giao agent.
 Dự án `paused: true` vẫn được thu kết quả nhưng không bị đánh thức để đẩy thí nghiệm mới.
 Bỏ qua dự án chưa có thí nghiệm nào và thư mục bắt đầu bằng "_".
@@ -29,6 +33,7 @@ from labrat.cli import _notify_events  # noqa: E402
 from labrat.config import competitions_root, load_config  # noqa: E402
 
 IDLE_H = float(os.environ.get("LABRAT_IDLE_HOURS", "3"))
+QUIET = "[im lặng]"
 STATE = ROOT / ".tick_state.json"
 
 
@@ -50,6 +55,42 @@ def wake(slug: str, reason: str, state: dict) -> None:
     state[slug] = time.time()
     enqueue(slug, f"tick {slug}: {reason}. Đọc `python -m labrat tick {slug}` / registry rồi làm bước tiếp theo "
                   f"theo AGENT.md.")
+
+
+def pending_wakes() -> set[str]:
+    wq = ROOT / ".wake_queue"
+    out = set()
+    for f in (wq.glob("*.json") if wq.exists() else []):
+        try:
+            out.add(json.loads(f.read_text())["slug"])
+        except Exception:
+            pass
+    return out
+
+
+def autowork_due(base: dict, cfg: dict, slug: str, state: dict, chk: dict | None, pending: set[str],
+                 now: float | None = None) -> bool:
+    """Đến giờ phiên làm việc định kỳ của dự án chưa?"""
+    minutes = float((base.get("autowork") or {}).get("minutes", 60) or 0)
+    if minutes <= 0 or cfg.get("paused") or slug in pending:
+        return False
+    if chk and chk.get("stop"):
+        return False
+    now = now or time.time()
+    last = max(state.get(slug, 0), state.get("auto:" + slug, 0))
+    return now - last >= minutes * 60
+
+
+def autowork_message(slug: str, chk: dict | None) -> str:
+    gpu = ""
+    if chk:
+        free = chk["budget"]["free_gpu_slots"]
+        gpu = (f" Hiện có {free} tài khoản GPU rảnh." if chk.get("can_push_gpu_now") else
+               " Hiện chưa đẩy được GPU (" + ("; ".join(chk.get("reasons") or []) or "mọi tài khoản bận") + ").")
+    return (f"PHIÊN LÀM VIỆC ĐỊNH KỲ cho dự án {slug}.{gpu} Tự tiếp tục nghiên cứu theo AGENT.md: thu & phân tích kết "
+            f"quả mới, cập nhật plan.md, chuẩn bị (smoke) và đẩy thí nghiệm tiếp nếu có tài khoản rảnh; nếu GPU đều bận "
+            f"thì dùng lượt này cho phân tích lỗi, EDA, đọc tài liệu, chuẩn bị thí nghiệm kế tiếp. Trả lời 1–3 dòng về "
+            f"việc đã làm; nếu không có gì đáng báo, trả lời bắt đầu bằng \"{QUIET}\" (sẽ không gửi Telegram).")
 
 
 def scan_dropbox() -> None:
@@ -89,11 +130,18 @@ def main():
     print(f"[{datetime.now():%Y-%m-%d %H:%M}] tick")
     check_disk(base, state)
     scan_dropbox()
-    for reg_path in sorted(competitions_root(base).glob("*/registry.json")):
-        slug = reg_path.parent.name
+    pending = pending_wakes()
+    for proj in sorted(competitions_root(base).glob("*/project.yaml")):
+        slug = proj.parent.name
         if slug.startswith("_"):
             continue
         cfg = load_config(slug)
+        reg = experiments.registry_for(cfg)
+        if not reg.experiments:  # dự án mới / vừa reset: chỉ có phiên làm việc định kỳ
+            if autowork_due(base, cfg, slug, state, None, pending):
+                state["auto:" + slug] = time.time()
+                enqueue(slug, autowork_message(slug, None))
+            continue
         try:  # dự án tạm dừng vẫn được thu kết quả kernel đang chạy
             events = experiments.poll(cfg)
         except Exception as e:  # mạng lỗi, token hết hạn...
@@ -101,8 +149,6 @@ def main():
             continue
         _notify_events(cfg, events)
         reg = experiments.registry_for(cfg)
-        if not reg.experiments:
-            continue
         finished = [ev for ev in events if ev["status"] not in ("queued", "running", "unknown")]
         chk = budget.stop_check(cfg, reg)
         print(f"  {slug}: active={[e['id'] for e in reg.active()]} finished={[ev['exp'] for ev in finished]} "
@@ -115,6 +161,9 @@ def main():
               and time.time() - state.get(slug, 0) > IDLE_H * 3600):
             free = chk["budget"]["free_gpu_slots"]
             wake(slug, f"còn {free} tài khoản GPU rảnh và đã {IDLE_H:g} giờ không có sự kiện", state)
+        elif autowork_due(base, cfg, slug, state, chk, pending):
+            state["auto:" + slug] = time.time()
+            enqueue(slug, autowork_message(slug, chk))
     STATE.write_text(json.dumps(state))
 
 

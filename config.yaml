@@ -18,7 +18,8 @@ budget:
   weekly_gpu_hours: 30           # quota tuần MỖI tài khoản Kaggle (reset 00:00 UTC thứ Bảy)
   project_gpu_hours: 20          # trần GPU cho MỘT dự án, cộng trên mọi tài khoản (ghi đè trong project.yaml)
   reserve_hours: 1.0             # mỗi tài khoản luôn chừa lại, không bao giờ tiêu
-  startup_overhead_hours: 0.05   # cộng thêm mỗi lần chạy (khởi động container)
+  startup_overhead_hours: 0.1    # cộng thêm mỗi lần chạy (khởi động container, lưu output)
+  # quota_scan_roots: []         # mặc định tự tìm bot Labrat anh em (~/Labrat*) để cộng giờ của tài khoản dùng chung
   phases:                        # phân bổ ngân sách theo giai đoạn (tỉ lệ của project_gpu_hours)
     explore: 0.2                 # baseline + EDA/phân tích lỗi + thử các hướng có căn cứ
     exploit: 0.6                 # đào sâu cơ chế của các hướng hiệu quả
@@ -67,6 +68,9 @@ disk:
 
 downloads:                       # tải dữ liệu từ link gửi qua Telegram
   max_gb: 50                     # giới hạn mỗi lần tải (còn kiểm tra dung lượng ổ trống)
+
+autowork:                        # phiên làm việc định kỳ (cron tick_all.py, mỗi 15 phút kiểm tra)
+  minutes: 60                    # mỗi dự án đang hoạt động được đánh thức tối thiểu mỗi N phút; 0 = tắt
 
 telegram:
   enabled: true                  # token & chat id đặt trong .env
