@@ -69,6 +69,10 @@ disk:
 downloads:                       # tải dữ liệu từ link gửi qua Telegram
   max_gb: 50                     # giới hạn mỗi lần tải (còn kiểm tra dung lượng ổ trống)
 
+tick:                            # kiểm tra Kaggle định kỳ: thu kết quả, báo Telegram, đánh thức agent
+  in_bridge: true                # bridge tự chạy scripts/tick_all.py (không cần cron); log ở tick.log
+  interval_minutes: 15
+
 autowork:                        # phiên làm việc định kỳ (cron tick_all.py, mỗi 15 phút kiểm tra)
   minutes: 60                    # mỗi dự án đang hoạt động được đánh thức tối thiểu mỗi N phút; 0 = tắt
 

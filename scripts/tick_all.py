@@ -14,6 +14,8 @@ Cũng quét thư mục dropbox: dữ liệu mới/cập nhật đã chép xong �
 Dự án `paused: true` vẫn được thu kết quả nhưng không bị đánh thức để đẩy thí nghiệm mới.
 Bỏ qua dự án chưa có thí nghiệm nào và thư mục bắt đầu bằng "_".
 
+Bridge Telegram tự chạy script này mỗi `tick.interval_minutes` (mặc định 15) — KHÔNG cần cron. Cron vẫn dùng được
+song song (khoá .tick.lock đảm bảo không chạy chồng; chạy lặp cũng không báo trùng vì poll chỉ báo kernel mới xong).
 Cron ví dụ (mỗi 15 phút):
   */15 * * * * /home/labrat/Labrat/.venv/bin/python /home/labrat/Labrat/scripts/tick_all.py >> /home/labrat/labrat-tick.log 2>&1
 """
@@ -167,5 +169,20 @@ def main():
     STATE.write_text(json.dumps(state))
 
 
+def run_locked() -> None:
+    import fcntl
+    lock = open(ROOT / ".tick.lock", "w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        print(f"[{datetime.now():%Y-%m-%d %H:%M}] tick khác đang chạy — bỏ qua")
+        return
+    try:
+        main()
+    finally:
+        fcntl.flock(lock, fcntl.LOCK_UN)
+        lock.close()
+
+
 if __name__ == "__main__":
-    main()
+    run_locked()

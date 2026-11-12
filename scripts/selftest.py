@@ -928,6 +928,27 @@ def _tests(data_dir: Path):
     check(not tick.autowork_due(base, cfg, "p", {}, {"stop": True}, set(), nowt), "hết ngân sách / dừng → không")
     check(not tick.autowork_due({"autowork": {"minutes": 0}}, cfg, "p", {}, None, set(), nowt), "minutes: 0 → tắt")
     check("[im lặng]" in tick.autowork_message("p", None), "lời nhắc định kỳ cho phép trả lời im lặng")
+    import fcntl, io, contextlib
+    tick.ROOT = Path(tempfile.mkdtemp())
+    held = open(tick.ROOT / ".tick.lock", "w"); fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    called = []
+    tick.main = lambda: called.append(1)
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        tick.run_locked()
+    check(not called and "đang chạy" in buf.getvalue(), "tick đang chạy (bridge hoặc cron) → lần thứ hai bỏ qua, không chạy chồng")
+    fcntl.flock(held, fcntl.LOCK_UN); held.close()
+    tick.run_locked()
+    check(called == [1], "hết khoá → tick chạy bình thường")
+    ran = []
+    _rt = bridge.run_tick
+    bridge.run_tick = lambda timeout_s=1800: ran.append(1) or 0
+    msg = bridge.handle_quick("/tick")
+    time.sleep(0.3)
+    bridge.run_tick = _rt
+    check("Đang kiểm tra" in msg and ran == [1], "/tick trên Telegram chạy kiểm tra Kaggle ngay")
+    check(bridge.TICK_SCRIPT.exists() and (load_config().get("tick") or {}).get("in_bridge") is True,
+          "bridge tự chạy tick_all.py định kỳ (mặc định bật, không cần cron)")
 
     from labrat import kfetch
     compile(kfetch._script("deb", "microsoft/deberta-v3-base", "model", ["*.json"], ["https://x/y.bin"], "echo hi"),

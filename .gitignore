@@ -26,3 +26,5 @@ webpages/
 .labrat_tmp/
 .llm_usage.jsonl
 .cache/
+tick.log
+.tick.lock

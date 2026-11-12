@@ -106,7 +106,7 @@ rồi `python -m labrat report <slug> --send` và trả lời ngắn kết quả
   phân tích, đẩy thí nghiệm tiếp nếu còn ngân sách và dự án không `paused`; GPU bận thì phân tích lỗi / đọc tài liệu /
   chuẩn bị thí nghiệm kế tiếp. Trả lời 1–3 dòng; không có gì đáng báo → bắt đầu bằng `[im lặng]` (không gửi Telegram).
 - Giờ GPU có vẻ sai / kernel bị từ chối vì hết quota → nhờ người dùng gửi `/quota <tk> <giờ đã dùng trên kaggle.com>`.
-- Bridge tự xử lý `/status /accounts /quota /usage /new /stop /resume /dropbox /scan /get /cancel` và tự tải link dữ liệu.
+- Bridge tự xử lý `/status /accounts /quota /tick /usage /new /stop /resume /dropbox /scan /get /cancel` và tự tải link dữ liệu.
 - "ngân sách N giờ" → sửa `budget.project_gpu_hours` trong `project.yaml`; "thử <ý tưởng>" → đưa lên đầu `plan.md`.
 
 ## Tài liệu chi tiết — đọc khi cần

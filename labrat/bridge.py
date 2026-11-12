@@ -13,6 +13,8 @@ from __future__ import annotations
 import json
 import os
 import queue
+import subprocess
+import sys
 import re
 import threading
 import time
@@ -35,6 +37,7 @@ HELP = """Lệnh nhanh:
 /status — tình hình mọi dự án
 /accounts — quota & kernel từng tài khoản Kaggle
 /quota [tk giờ] — hiệu chỉnh giờ GPU đã dùng theo số trên kaggle.com
+/tick — kiểm tra Kaggle ngay (bình thường bot tự kiểm tra mỗi 15 phút)
 /new — bắt đầu phiên agent mới (quên ngữ cảnh cũ; lượt sau sẽ cache miss một lần)
 /usage — token, cache hit 24h và chi tiêu OpenRouter
 /stop <slug> — tạm dừng dự án (không đẩy thí nghiệm mới)
@@ -208,6 +211,9 @@ def handle_quick(text: str) -> str | None:
         return HELP
     if cmd == "/status":
         return quick_status()
+    if cmd == "/tick":
+        threading.Thread(target=run_tick, daemon=True).start()
+        return "🔄 Đang kiểm tra Kaggle — thí nghiệm nào xong sẽ được báo ngay, agent được đánh thức nếu cần."
     if cmd == "/accounts":
         return quick_accounts()
     if cmd == "/quota":
@@ -380,6 +386,32 @@ def worker(tg: Telegram, q: "queue.Queue[dict]", busy: threading.Event):
             busy.clear()
 
 
+TICK_LOG = ROOT / "tick.log"
+TICK_SCRIPT = ROOT / "scripts" / "tick_all.py"
+
+
+def run_tick(timeout_s: float = 1800) -> int:
+    """Chạy tick_all.py (thu kết quả Kaggle, báo Telegram, đánh thức agent) — ghi log vào tick.log."""
+    try:
+        if TICK_LOG.exists() and TICK_LOG.stat().st_size > 5_000_000:  # giữ log gọn
+            TICK_LOG.write_text(TICK_LOG.read_text(errors="replace")[-1_000_000:])
+        with open(TICK_LOG, "a") as log:
+            return subprocess.run([sys.executable, str(TICK_SCRIPT)], cwd=ROOT, stdout=log,
+                                  stderr=subprocess.STDOUT, timeout=timeout_s).returncode
+    except Exception as e:
+        print(f"[tick] lỗi: {e}", flush=True)
+        return -1
+
+
+def ticker(interval_min: float):
+    """Tự kiểm tra Kaggle định kỳ ngay trong bridge — không phụ thuộc cron."""
+    time.sleep(60)  # để bridge khởi động xong
+    while True:
+        rc = run_tick(timeout_s=max(interval_min * 60 * 2, 600))
+        print(f"[tick] xong rc={rc}", flush=True)
+        time.sleep(interval_min * 60)
+
+
 def main():
     tg = Telegram()
     q: "queue.Queue[dict]" = queue.Queue()
@@ -387,6 +419,9 @@ def main():
     threading.Thread(target=worker, args=(tg, q, busy), daemon=True).start()
     dl = Downloader(tg, q)
     dl.start()
+    tcfg = load_config().get("tick", {}) or {}
+    if tcfg.get("in_bridge", True):
+        threading.Thread(target=ticker, args=(float(tcfg.get("interval_minutes", 15)),), daemon=True).start()
     offset = int(OFFSET_FILE.read_text()) if OFFSET_FILE.exists() else None
     h = agent.load_harness()
     try:

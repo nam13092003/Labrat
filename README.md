@@ -173,6 +173,9 @@ Sổ tay agent gồm `AGENT.md` (luật chung, < 200 dòng, nạp mỗi lượt)
   khác trên cùng máy (`~/Labrat*`) dùng chung tài khoản. Lệch so với kaggle.com (Settings → Quota) → hiệu chỉnh:
   Telegram `/quota <tài khoản> <giờ đã dùng>` hoặc `labrat quota <tk> --used H` (lưu ở `~/.labrat_quota.json`, dùng chung
   mọi bot; tự hết hiệu lực khi quota reset thứ Bảy).
+- **Tự kiểm tra Kaggle.** Bridge tự chạy `scripts/tick_all.py` mỗi `tick.interval_minutes` (15) — thu kết quả, báo
+  Telegram, đánh thức agent — không cần cron (cron cũ vẫn chạy song song được, có khoá chống chạy chồng). Log ở
+  `tick.log`; `/tick` trên Telegram để kiểm tra ngay.
 - **Phiên làm việc định kỳ.** Cron `tick_all.py` đánh thức mỗi dự án đang hoạt động tối thiểu mỗi `autowork.minutes`
   (mặc định 60) để agent tự nghiên cứu tiếp, kể cả khi GPU đều bận. Không có gì đáng báo thì không gửi Telegram.
 - **Tải trên Kaggle, không qua VPS.** `model_sources` / `dataset_sources` trong job.yaml cho tài nguyên có sẵn trên Kaggle;
